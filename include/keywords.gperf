@@ -1,0 +1,83 @@
+%language=C++
+%define class-name ReservedKeywordHash
+%define lookup-function-name isInWordSet
+%define slot-name keyword
+%compare-lengths
+%readonly-tables
+%enum
+%compare-strncmp
+%struct-type
+%{
+// ---------------------------------------------------------------------------
+// qcp
+// ---------------------------------------------------------------------------
+#include "token.h"
+// ---------------------------------------------------------------------------
+namespace qcp {
+// ---------------------------------------------------------------------------
+%}
+struct GPerfToken;
+%%
+"alignas", TokenType::ALIGNAS
+"_Alignas", TokenType::ALIGNAS
+"alignof", TokenType::ALIGNOF
+"_Alignof", TokenType::ALIGNOF
+"auto", TokenType::AUTO
+"bool", TokenType::BOOL
+"_Bool", TokenType::BOOL
+"break", TokenType::BREAK
+"case", TokenType::CASE
+"char", TokenType::CHAR
+"const", TokenType::CONST
+"constexpr", TokenType::CONSTEXPR
+"continue", TokenType::CONTINUE
+"default", TokenType::DEFAULT
+"do", TokenType::DO
+"double", TokenType::DOUBLE
+"else", TokenType::ELSE
+"enum", TokenType::ENUM
+"extern", TokenType::EXTERN
+"false", TokenType::FALSE
+"float", TokenType::FLOAT
+"for", TokenType::FOR
+"goto", TokenType::GOTO
+"if", TokenType::IF
+"inline", TokenType::INLINE
+"int", TokenType::INT
+"long", TokenType::LONG
+"nullptr", TokenType::NULLPTR
+"register", TokenType::REGISTER
+"restrict", TokenType::RESTRICT
+"return", TokenType::RETURN
+"short", TokenType::SHORT
+"signed", TokenType::SIGNED
+"sizeof", TokenType::SIZEOF
+"static", TokenType::STATIC
+"static_assert", TokenType::STATIC_ASSERT
+"_Static_assert", TokenType::STATIC_ASSERT
+"struct", TokenType::STRUCT
+"switch", TokenType::SWITCH
+"thread_local", TokenType::THREAD_LOCAL
+"_Thread_local", TokenType::THREAD_LOCAL
+"true", TokenType::TRUE
+"typedef", TokenType::TYPEDEF
+"typeof", TokenType::TYPEOF
+"typeof_unqual", TokenType::TYPEOF_UNQUAL
+"union", TokenType::UNION
+"unsigned", TokenType::UNSIGNED
+"void", TokenType::VOID
+"volatile", TokenType::VOLATILE
+"while", TokenType::WHILE
+"_Atomic", TokenType::ATOMIC
+"_BitInt", TokenType::BITINT
+"_Complex", TokenType::COMPLEX
+"_Decimal128", TokenType::DECIMAL128
+"_Decimal32", TokenType::DECIMAL32
+"_Decimal64", TokenType::DECIMAL64
+"_Generic", TokenType::GENERIC
+"_Imaginary", TokenType::IMAGINARY
+"_Noreturn", TokenType::NORETURN
+%%
+// ---------------------------------------------------------------------------
+} // end namespace qcp
+// ---------------------------------------------------------------------------
