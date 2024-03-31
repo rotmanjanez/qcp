@@ -51,7 +51,6 @@ set(SRC_CC
 
 # "${CMAKE_SOURCE_DIR}"
 set(TEST_CC
-    "${CMAKE_SOURCE_DIR}/test/dummy.cc"
     "${CMAKE_SOURCE_DIR}/test/test_tokenizer.cc"
 )
 
