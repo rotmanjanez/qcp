@@ -5,6 +5,7 @@
 #include <array>
 #include <cassert>
 #include <iomanip>
+#include <limits>
 #include <tuple>
 // ---------------------------------------------------------------------------
 namespace {
