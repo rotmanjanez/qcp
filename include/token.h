@@ -193,7 +193,7 @@ class Token {
       } else if constexpr (std::is_same_v<T, std::string_view>) {
          return ident;
       } else {
-         // todo: (jr) static_assert(false, "Unsupported type");
+         assert(false && "Unsupported type");
       }
    }
 

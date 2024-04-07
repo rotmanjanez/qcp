@@ -241,52 +241,6 @@ std::array<std::string, 19> stringLiteralList{
     // "\"non-standard escape \\e for ASCII escape \"",
 };
 // ---------------------------------------------------------------------------
-/*template <std::size_t len>
-std::pair<std::string, std::array<std::pair<qcp::Token, std::function<void(qcp::Token)>>, len>> randomTokenSequence() {
-   std::stringstream src{};
-   std::array<std::pair<qcp::Token, std::function<void(qcp::Token)>>, len> tokens;
-
-   for (auto& token : tokens) {
-      qcp::TokenType type = static_cast<qcp::TokenType>(rand() % static_cast<int>(qcp::TokenType::END));
-      int value = rand();
-      if (value < 0) {
-         value *= -1;
-      }
-      switch (type) {
-         case qcp::TokenType::ICONST:
-            src << value;
-            token = qcp::Token(value);
-            break;
-         case qcp::TokenType::U_ICONST:
-            src << value << "u";
-            token = qcp::Token(static_cast<unsigned>(value));
-            break;
-         case qcp::TokenType::L_ICONST:
-            src << value << "l";
-            token = qcp::Token(static_cast<unsigned>(value));
-            break;
-         case qcp::TokenType::UL_ICONST:
-            src << value << "lu";
-            token = qcp::Token(static_cast<unsigned long>(value));
-            break;
-         case qcp::TokenType::LL_ICONST:
-            src << value << "ll";
-            token = qcp::Token(static_cast<long long>(value));
-            break;
-         case qcp::TokenType::ULL_ICONST:
-            src << value << "llu";
-            token = qcp::Token(static_cast<unsigned long long>(value));
-            break;
-         case qcp::TokenType::IDENT:
-            src << qcp::Token{identifierList[rand() % identifierList.size()]};
-            break;
-         default:
-            break;
-      }
-   }
-   return result;
-}*/
-// ---------------------------------------------------------------------------
 class TT : public ::testing::TestWithParam<std::pair<tt, std::string>> {
 };
 // ---------------------------------------------------------------------------

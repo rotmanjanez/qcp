@@ -391,28 +391,6 @@ T safe_cast(U value) {
 }
 // ---------------------------------------------------------------------------
 std::tuple<std::size_t, qcp::Token> getNumberConst(sv_it beginIt, sv_it endIt) {
-   /*
-   floating-constant
-      decimal-floating-constant
-         fractional-constant exponent-partopt floating-suffixop
-         digit-sequence exponent-part floating-suffixop
-      hexadecimal-floating-constant
-         hexadecimal-prefix hexadecimal-fractional-constant binary-exponent-part floating-suffixop
-         hexadecimal-prefix hexadecimal-digit-sequence binary-exponent-part floating-suffixop
-   integer-constant:
-      decimal-constant integer-suffixopt
-      octal-constant integer-suffixopt
-      hexadecimal-constant integer-suffixopt
-      binary-constant integer-suffixopt
-   
-
-   fractional-constant:
-      digit-sequenceopt . digit-sequence
-      digit-sequence .
-   exponent-part:
-      e signopt digit-sequence
-      E signopt digit-sequence
-   */
    sv_it valueEndIt = beginIt;
    sv_it suffixEndIt;
    int offset = 0;
@@ -642,14 +620,14 @@ namespace qcp {
 // ---------------------------------------------------------------------------
 Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
    if (remainder.empty()) {
-      token = Token{TokenType::END};
+      token_ = Token{TokenType::END};
       return *this;
    }
 
    // find begin of next word
    auto beginIt = std::find_if(remainder.begin(), remainder.end(), [](char c) { return isPunctuatorStart(c) or isIdentStart(c) or isDigit(c) or c == '"' or c == '\''; });
    if (beginIt == remainder.end()) {
-      token = Token{TokenType::END};
+      token_ = Token{TokenType::END};
       return *this;
    }
    // todo: implement custom class with src code with a peek() method
@@ -660,7 +638,7 @@ Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
    if (isPunctuatorStart(*beginIt) and not(*beginIt == '.' and isDigit(second))) {
       auto [len, type] = getPunctuator(beginIt, remainder.end());
       remainder = remainder.substr(len + whitespace);
-      token = Token{type};
+      token_ = Token{type};
    } else if (isIdentStart(*beginIt)) {
       requiresSeparator = true;
       // todo: (jr) u8, u, U, L prefix not supported
@@ -670,15 +648,15 @@ Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
       const GPerfToken* t = ReservedKeywordHash::isInWordSet(ident.data(), ident.size());
       // todo: (jr) handle constants
       if (t) {
-         token = Token{*t};
+         token_ = Token{*t};
       } else {
-         token = Token{ident};
+         token_ = Token{ident};
       }
    } else if (isDigit(*beginIt) or (*beginIt == '.' and isDigit(second))) {
       requiresSeparator = true;
       auto [len, t] = getNumberConst(beginIt, remainder.end());
       remainder = remainder.substr(len + whitespace);
-      token = t;
+      token_ = t;
    } else if (*beginIt == '"' or *beginIt == '\'') {
       // todo: (jr) handle encoding prefix
       std::size_t len;
@@ -694,7 +672,7 @@ Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
          assert(false && "invalid string/char literal. missing closing '\"' or '\\''");
       }
       remainder = remainder.substr(len + 2 + whitespace);
-      token = Token{std::string_view{beginIt + 1, len}, TokenType::LITERAL};
+      token_ = Token{std::string_view{beginIt + 1, len}, TokenType::LITERAL};
    }
 
    if (requiresSeparator && !remainder.empty()) {
