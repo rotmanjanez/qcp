@@ -12,6 +12,10 @@ namespace {
 using TokenType = qcp::TokenType;
 using sv_it = std::string_view::const_iterator;
 // ---------------------------------------------------------------------------
+bool isSeparator(const char c) {
+   return c == ' ' or c == '\t' or c == '\n';
+}
+// ---------------------------------------------------------------------------
 bool isNoneDigit(const char c) {
    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
 }
@@ -67,6 +71,25 @@ bool isPunctuatorStart(const char c) {
       case ';':
       case '#':
       case ',':
+         return true;
+      default:
+         return false;
+   }
+}
+// ---------------------------------------------------------------------------
+bool isSimpleEscapeSequenceChar(const char c) {
+   switch (c) {
+      case '\'':
+      case '\"':
+      case '\?':
+      case '\\':
+      case 'a':
+      case 'b':
+      case 'f':
+      case 'n':
+      case 'r':
+      case 't':
+      case 'v':
          return true;
       default:
          return false;
@@ -311,46 +334,165 @@ std::pair<size_t, TokenType> getPunctuator(sv_it beginIt, sv_it endIt) {
          }
          break;
       default:
-         std::cerr << "unknown punctuator: " << *beginIt << std::endl;
          assert(false && "unknown punctuator");
    }
    return std::make_pair(len, type);
 }
 // ---------------------------------------------------------------------------
-std::tuple<std::size_t, qcp::Token> getIConst(sv_it beginIt, sv_it endIt) {
-   sv_it valueEndIt;
+template <typename _NumberPredicate>
+sv_it findEndOfINumber(sv_it beginIt, sv_it endIt, _NumberPredicate _p) {
+   sv_it it = beginIt;
+   char prev;
+   do {
+      it = std::find_if_not(it, endIt, _p);
+      if (it == endIt) {
+         break;
+      }
+      prev = *it;
+      if (*it == '\'') {
+         ++it;
+      }
+   } while (it != endIt && !(prev == '\'' && *it == '\'') && _p(*it));
+   if (prev == '\'') {
+      assert(false && "invalid number: number may not end with '");
+   }
+   return it;
+}
+// ---------------------------------------------------------------------------
+struct BinaryExpontent {
+   static constexpr char exponentCharUpper = 'P';
+   static constexpr char exponentCharLower = 'p';
+};
+// ---------------------------------------------------------------------------
+struct DecimalExponent {
+   static constexpr char exponentCharUpper = 'E';
+   static constexpr char exponentCharLower = 'e';
+};
+// ---------------------------------------------------------------------------
+template <typename _Exponent>
+   requires std::is_same_v<_Exponent, BinaryExpontent> or std::is_same_v<_Exponent, DecimalExponent>
+sv_it findEndOfExponent(sv_it beginIt, sv_it endIt) {
+   if (beginIt != endIt && (*beginIt == _Exponent::exponentCharUpper or *beginIt == _Exponent::exponentCharLower)) {
+      ++beginIt;
+      if (beginIt != endIt && (*beginIt == '+' or *beginIt == '-')) {
+         ++beginIt;
+      }
+      beginIt = findEndOfINumber(beginIt, endIt, isDigit);
+   }
+   return beginIt;
+}
+// ---------------------------------------------------------------------------
+template <typename T, typename U>
+T safe_cast(U value) {
+   if (value > std::numeric_limits<T>::max()) {
+      assert(false && "value to large for safe cast");
+   }
+   return static_cast<T>(value);
+}
+// ---------------------------------------------------------------------------
+std::tuple<std::size_t, qcp::Token> getNumberConst(sv_it beginIt, sv_it endIt) {
+   /*
+   floating-constant
+      decimal-floating-constant
+         fractional-constant exponent-partopt floating-suffixop
+         digit-sequence exponent-part floating-suffixop
+      hexadecimal-floating-constant
+         hexadecimal-prefix hexadecimal-fractional-constant binary-exponent-part floating-suffixop
+         hexadecimal-prefix hexadecimal-digit-sequence binary-exponent-part floating-suffixop
+   integer-constant:
+      decimal-constant integer-suffixopt
+      octal-constant integer-suffixopt
+      hexadecimal-constant integer-suffixopt
+      binary-constant integer-suffixopt
+   
+
+   fractional-constant:
+      digit-sequenceopt . digit-sequence
+      digit-sequence .
+   exponent-part:
+      e signopt digit-sequence
+      E signopt digit-sequence
+   */
+   sv_it valueEndIt = beginIt;
    sv_it suffixEndIt;
    int offset = 0;
    int base;
+   bool isFloat = false;
 
-   if (*beginIt == '0') {
-      const char second = (beginIt + 1 != endIt) ? *(beginIt + 1) : 0;
-      if (second == 'x' or second == 'X') {
-         // hex
-         valueEndIt = std::find_if_not(beginIt + 2, endIt, isHexDigit);
-         base = 16;
-         offset = 2;
-      } else if (second == 'b' or second == 'B') {
-         // binary
-         valueEndIt = std::find_if_not(beginIt + 2, endIt, isBinaryDigit);
-         base = 2;
-         offset = 2;
-      } else {
-         // octal
-         valueEndIt = std::find_if_not(beginIt + 1, endIt, isOctalDigit);
-         base = 8;
+   const char second = (beginIt + 1 != endIt) ? *(beginIt + 1) : 0;
+   if (*beginIt == '0' && (second == 'x' or second == 'X')) {
+      // hex or hex-float
+      auto first = beginIt + 2;
+      base = 16;
+      offset = 2;
+      if (first != endIt && *first == '.') {
+         isFloat = true;
       }
+      valueEndIt = findEndOfINumber(first, endIt, isHexDigit);
+      if (valueEndIt != endIt && *valueEndIt == '.') {
+         isFloat = true;
+         valueEndIt = findEndOfINumber(valueEndIt + 1, endIt, isHexDigit);
+      }
+      if (valueEndIt != endIt && (*valueEndIt == 'p' or *valueEndIt == 'P')) {
+         isFloat = true;
+      }
+
+      if (isFloat) {
+         offset = 0;
+      } else {
+         assert(valueEndIt != first && "invalid hex number");
+      }
+   } else if (*beginIt == '0' && (second == 'b' or second == 'B')) {
+      // binary
+      valueEndIt = findEndOfINumber(beginIt + 2, endIt, isBinaryDigit);
+      base = 2;
+      offset = 2;
+      assert(valueEndIt != beginIt + 2 && "invalid binary number");
    } else {
-      // decimal
-      valueEndIt = std::find_if_not(beginIt, endIt, isDigit);
-      base = 10;
+      // decimal, octal or decimal-float
+      auto first = beginIt;
+      if (*first == '.') {
+         isFloat = true;
+      }
+      valueEndIt = findEndOfINumber(first, endIt, isDigit);
+      if (valueEndIt != endIt && *valueEndIt == '.') {
+         isFloat = true;
+         valueEndIt = findEndOfINumber(valueEndIt + 1, endIt, isDigit);
+      }
+      if (!isFloat && *beginIt == '0') {
+         base = 8;
+         if (findEndOfINumber(beginIt + 1, endIt, isOctalDigit) != valueEndIt) {
+            assert(false && "invalid octal number");
+         }
+      } else {
+         base = 10;
+         if (valueEndIt != endIt && (*valueEndIt == 'e' or *valueEndIt == 'E')) {
+            isFloat = true;
+         }
+      }
    }
+   if (isFloat) {
+      if (base == 16) {
+         valueEndIt = findEndOfExponent<BinaryExpontent>(valueEndIt, endIt);
+      } else {
+         valueEndIt = findEndOfExponent<DecimalExponent>(valueEndIt, endIt);
+      }
+   }
+
    std::string valueRepr{beginIt + offset, valueEndIt};
+   auto valueRepreEndIt = std::remove(valueRepr.begin(), valueRepr.end(), '\'');
+   valueRepr.erase(valueRepreEndIt, valueRepr.end());
 
    bool unsignedSuffix = false;
    bool longSuffix = false;
    bool longLongSuffix = false;
    bool bitPreciseIntSuffix = false;
+   bool floatSuffix = false;
+   bool doubleSuffix = false;
+
+   (void) doubleSuffix; // todo: (jr)
+   (void) floatSuffix; // todo: (jr)
+   (void) bitPreciseIntSuffix; // todo: (jr)
 
    suffixEndIt = valueEndIt;
    if (suffixEndIt != endIt) {
@@ -358,7 +500,11 @@ std::tuple<std::size_t, qcp::Token> getIConst(sv_it beginIt, sv_it endIt) {
       if (first == 'u' or first == 'U') {
          unsignedSuffix = true;
          ++suffixEndIt;
+      } else if (first == 'f' or first == 'F') {
+         floatSuffix = true;
+         ++suffixEndIt;
       }
+
       if (suffixEndIt != endIt) {
          const char second = *suffixEndIt;
          const char third = suffixEndIt + 1 != endIt ? *(suffixEndIt + 1) : 0;
@@ -391,42 +537,103 @@ std::tuple<std::size_t, qcp::Token> getIConst(sv_it beginIt, sv_it endIt) {
 
    qcp::Token t;
    errno = 0;
-   std::size_t pos;
-   if (unsignedSuffix && longLongSuffix) {
-      unsigned long long value = std::stoull(valueRepr, &pos, base);
-      t = qcp::Token{value};
-   } else if (unsignedSuffix && longSuffix) {
-      unsigned long value = std::stoul(valueRepr, &pos, base);
-      t = qcp::Token{value};
-   } else if (unsignedSuffix && bitPreciseIntSuffix) {
-      assert(false && "bit precise int suffix not supported");
-   } else if (longLongSuffix) {
-      long long value = std::stoll(valueRepr, &pos, base);
-      t = qcp::Token{value};
-   } else if (longSuffix) {
-      long value = std::stol(valueRepr, &pos, base);
-      t = qcp::Token{value};
-   } else if (bitPreciseIntSuffix) {
-      assert(false && "bit precise int suffix not supported");
-   } else if (unsignedSuffix) {
-      // todo: (jr) handle to large values
-      unsigned value = std::stoul(valueRepr, &pos, base);
-      t = qcp::Token{value};
+   char* pos;
 
-   } else {
-      int value = std::stoi(valueRepr, &pos, base);
+   if (isFloat) {
+      double value = std::strtod(valueRepr.c_str(), &pos);
       t = qcp::Token{value};
+   } else if (unsignedSuffix) {
+      unsigned long long value = std::strtoull(valueRepr.c_str(), &pos, base);
+      if (longLongSuffix) {
+         t = qcp::Token{value};
+      } else if (longSuffix) {
+         t = qcp::Token{safe_cast<unsigned long>(value)};
+      } else {
+         t = qcp::Token{safe_cast<unsigned>(value)};
+      }
+   } else {
+      long long value = static_cast<long long>(std::strtoull(valueRepr.c_str(), &pos, base));
+      if (longLongSuffix) {
+         t = qcp::Token{safe_cast<long long>(value)};
+      } else if (longSuffix) {
+         t = qcp::Token{safe_cast<long>(value)};
+      } else {
+         t = qcp::Token{safe_cast<int>(value)};
+      }
    }
 
    if (errno == ERANGE) {
-      std::cerr << "range error: " << valueRepr << std::endl;
       assert(false && "range error");
-   } else if (pos != valueRepr.length()) {
-      std::cerr << "invalid number: " << valueRepr << std::endl;
+   } else if (pos != valueRepr.c_str() + valueRepr.length()) {
       assert(false && "invalid number");
    }
 
    return std::make_tuple(std::distance(beginIt, suffixEndIt), t);
+}
+// ---------------------------------------------------------------------------
+struct CCharSequence {
+   static constexpr char quoteChar = '\'';
+};
+// ---------------------------------------------------------------------------
+struct SCharSequence {
+   static constexpr char quoteChar = '"';
+};
+// ---------------------------------------------------------------------------
+/**
+ * @brief Returns the length of the character sequence that is part of a string literal or character constant.
+ * 
+ * @tparam _CharSequence The character sequence type. (CCharSequence or SCharSequence)
+ * @param beginIt An iterator pointing to the first character of the string literal.
+ * @param endIt An iterator pointing to the end of the string literal (excluding the "/' character).
+ * @return The length of the character sequence.
+ */
+template <typename _CharSequence>
+   requires std::is_same_v<_CharSequence, CCharSequence> or std::is_same_v<_CharSequence, SCharSequence>
+std::size_t getCharSequencLength(sv_it beginIt, sv_it endIt) {
+   sv_it it = beginIt;
+   while (it != endIt) {
+      it = std::find_if(it, endIt, [](const char c) { return c == '\\' || c == _CharSequence::quoteChar || c == '\n'; });
+      if (it == endIt) {
+         break;
+      }
+      if (*it == '\\') {
+         if (it + 1 == endIt) {
+            break;
+         }
+         ++it;
+         if (isOctalDigit(*it)) {
+            // octal
+            int octalCount;
+            for (octalCount = 1; octalCount < 3 && (it + octalCount) != endIt; ++octalCount) {
+               if (!isOctalDigit(*(it + octalCount))) {
+                  break;
+               }
+            }
+            it += octalCount;
+            // todo: (jr) handle octal values
+         } else if (*it == 'x') {
+            // hex
+            ++it;
+            int hexCount = 0;
+            while (it != endIt && isHexDigit(*it)) {
+               ++it;
+               ++hexCount;
+            }
+            if (hexCount == 0) {
+               assert(false && "invalid hex escape sequence");
+            }
+            // todo: (jr) handle hex values
+         } else if (isSimpleEscapeSequenceChar(*it)) {
+            ++it;
+         } else {
+            assert(false && "unknown escape sequence");
+         }
+
+      } else {
+         break;
+      }
+   }
+   return std::distance(beginIt, it);
 }
 // ---------------------------------------------------------------------------
 } // namespace
@@ -445,13 +652,17 @@ Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
       token = Token{TokenType::END};
       return *this;
    }
+   // todo: implement custom class with src code with a peek() method
+   char second = (beginIt + 1 != remainder.end()) ? *(beginIt + 1) : 0;
    std::size_t whitespace = std::distance(remainder.begin(), beginIt);
+   bool requiresSeparator = false;
 
-   if (isPunctuatorStart(*beginIt)) {
+   if (isPunctuatorStart(*beginIt) and not(*beginIt == '.' and isDigit(second))) {
       auto [len, type] = getPunctuator(beginIt, remainder.end());
       remainder = remainder.substr(len + whitespace);
       token = Token{type};
    } else if (isIdentStart(*beginIt)) {
+      requiresSeparator = true;
       // todo: (jr) u8, u, U, L prefix not supported
       auto endIt = std::find_if_not(beginIt, remainder.end(), isIdentCont);
       std::string_view ident{beginIt, endIt};
@@ -463,14 +674,34 @@ Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
       } else {
          token = Token{ident};
       }
-   } else if (isDigit(*beginIt)) {
-      auto [len, t] = getIConst(beginIt, remainder.end());
+   } else if (isDigit(*beginIt) or (*beginIt == '.' and isDigit(second))) {
+      requiresSeparator = true;
+      auto [len, t] = getNumberConst(beginIt, remainder.end());
       remainder = remainder.substr(len + whitespace);
       token = t;
-   } else if (*beginIt == '"') {
-      assert(false && "string literal not supported");
-   } else if (*beginIt == '\'') {
-      assert(false && "char literal not supported");
+   } else if (*beginIt == '"' or *beginIt == '\'') {
+      // todo: (jr) handle encoding prefix
+      std::size_t len;
+      if (*beginIt == '"') {
+         len = getCharSequencLength<SCharSequence>(beginIt + 1, remainder.end());
+      } else {
+         len = getCharSequencLength<CCharSequence>(beginIt + 1, remainder.end());
+      }
+      auto endIt = beginIt + len + 1;
+      if (endIt == remainder.end()) {
+         assert(false && "missing closing '\"' or '\\''");
+      } else if (*endIt != *beginIt) {
+         assert(false && "invalid string/char literal. missing closing '\"' or '\\''");
+      }
+      remainder = remainder.substr(len + 2 + whitespace);
+      token = Token{std::string_view{beginIt + 1, len}, TokenType::LITERAL};
+   }
+
+   if (requiresSeparator && !remainder.empty()) {
+      const char c = remainder.front();
+      if (!(isSeparator(c) || isPunctuatorStart(c) || c == ']')) {
+         assert(false && "Token not fully consumed");
+      }
    }
    return *this;
 }

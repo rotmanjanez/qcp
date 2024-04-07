@@ -145,6 +145,7 @@ struct GPerfToken {
 class Token {
    public:
    Token() : type{TokenType::UNKNOWN} {}
+
    explicit Token(double value) : type{TokenType::FCONST}, fvalue{value} {}
 
    explicit Token(unsigned long long value) : type{TokenType::ULL_ICONST}, ullValue{value} {}
@@ -154,7 +155,7 @@ class Token {
    explicit Token(long value) : type{TokenType::L_ICONST}, lValue{value} {}
    explicit Token(int value) : type{TokenType::ICONST}, iValue{value} {}
 
-   explicit Token(std::string_view value) : type{TokenType::IDENT}, ident{value} {}
+   explicit Token(std::string_view value, TokenType type = TokenType::IDENT) : type{type}, ident{value} {}
    explicit Token(TokenType type) : type{type} {}
    explicit Token(const GPerfToken& gperfToken) : type{static_cast<TokenType>(gperfToken.tokenType)} {}
 

@@ -11,7 +11,7 @@ namespace qcp {
 // ---------------------------------------------------------------------------
 class Tokenizer {
    public:
-   Tokenizer(const std::string_view src) : src{src} {}
+   explicit Tokenizer(const std::string_view src) : src{src} {}
 
    class const_iterator {
       public:
@@ -68,6 +68,10 @@ class Tokenizer {
 
    const_iterator cend() const {
       return end();
+   }
+
+   const std::string_view& data() const {
+      return src;
    }
 
    private:

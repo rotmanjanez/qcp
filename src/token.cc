@@ -1,5 +1,7 @@
 #include "token.h"
 // ---------------------------------------------------------------------------
+#include <iomanip>
+// ---------------------------------------------------------------------------
 namespace qcp {
 // ---------------------------------------------------------------------------
 std::ostream& operator<<(std::ostream& os, const TokenType& tt) {
@@ -148,6 +150,9 @@ std::ostream& operator<<(std::ostream& os, const Token& token) {
          break;
       case TokenType::IDENT:
          os << "IDENT(" << token.ident << ")";
+         break;
+      case TokenType::LITERAL:
+         os << "LITERAL(" << std::quoted(token.ident) << ")";
          break;
       // Handle other TokenType values here
       default:
