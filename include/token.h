@@ -4,9 +4,9 @@
 // qcp
 // ---------------------------------------------------------------------------
 #include <cassert>
-// ---------------------------------------------------------------------------
 #include <iostream>
 #include <string>
+#include <string_view>
 // ---------------------------------------------------------------------------
 namespace qcp {
 // ---------------------------------------------------------------------------
@@ -158,6 +158,7 @@ class Token {
    explicit Token(int value) : type{TokenType::ICONST}, iValue{value} {}
 
    explicit Token(std::string_view value, TokenType type = TokenType::IDENT) : type{type}, ident{value} {}
+
    explicit Token(TokenType type) : type{type} {}
    explicit Token(const GPerfToken& gperfToken) : type{static_cast<TokenType>(gperfToken.tokenType)} {}
 

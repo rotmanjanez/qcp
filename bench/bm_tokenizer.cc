@@ -8,8 +8,8 @@ namespace {
 void Tokenizer(benchmark::State& state) {
    std::string src{qcp::tool::random_c_program("gcc", 0)};
    std::size_t n = 0;
-   qcp::Tokenizer ts{src};
    for (auto _ : state) {
+      qcp::Tokenizer ts{src};
       for (auto token : ts) {
          ++n;
          benchmark::DoNotOptimize(token);
