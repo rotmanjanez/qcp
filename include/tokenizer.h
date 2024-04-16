@@ -770,7 +770,6 @@ Tokenizer<_DiagnosticTracker>::const_iterator& Tokenizer<_DiagnosticTracker>::co
    if (requiresSeparator && !prog_.empty()) {
       const char c = prog_.front();
       if (!(isSeparator(c) || isPunctuatorStart(c) || c == ']')) {
-         std::cout << "prog: " << std::quoted(prog_) << std::endl;
          *diagnostics_ << "token not fully consumed";
       }
    }
