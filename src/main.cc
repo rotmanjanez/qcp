@@ -2,6 +2,7 @@
 #include <string>
 #include <string_view>
 // ---------------------------------------------------------------------------
+#include "parser.h"
 #include "tokenizer.h"
 // ---------------------------------------------------------------------------
 // BRAIN DUMP
@@ -32,9 +33,19 @@ int main(int argc, char* argv[]) {
       code += line + '\n';
    }
 
-   qcp::Tokenizer ts{code};
-   for (const auto token : ts) {
-      std::cout << token << std::endl;
+   qcp::DiagnosticTracker diag{code};
+   qcp::Tokenizer<qcp::DiagnosticTracker> ts{code, diag};
+   for (const auto& token : ts) {
+      std::cout << token << '\n';
+   }
+
+   qcp::Parser<qcp::DiagnosticTracker> parser{code, diag};
+
+   parser.parse();
+
+   if (!diag.empty()) {
+      std::cout << diag << std::endl;
+      return 1;
    }
 
    return 0;

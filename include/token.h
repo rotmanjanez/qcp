@@ -3,166 +3,102 @@
 // ---------------------------------------------------------------------------
 // qcp
 // ---------------------------------------------------------------------------
+#include "loc.h"
+// ---------------------------------------------------------------------------
 #include <cassert>
 #include <iostream>
 #include <string>
 #include <string_view>
 // ---------------------------------------------------------------------------
 namespace qcp {
+namespace token {
 // ---------------------------------------------------------------------------
-enum TokenType {
+// clang-format off
+enum Kind {
+   // tokens in operator precedence order (as complete as possible) starting from the arethmetic operators (precedence 3)
+   ASTERISK, DIV, PERCENT,
+   PLUS, MINUS,
+   SHL, SHR,
+   L_ANGLE, LE, R_ANGLE, GE,
+   EQ, NE,
+   BW_AND, BW_XOR, BW_OR,
+   L_AND, L_OR,
+   __UNUSED__, // TERNARY CONDITIONAL MISSING
+   ASSIGN, ADD_ASSIGN, SUB_ASSIGN, MUL_ASSIGN, DIV_ASSIGN, REM_ASSIGN, SHL_ASSIGN, SHR_ASSIGN, BW_AND_ASSIGN, BW_XOR_ASSIGN, BW_OR_ASSIGN,
+   COMMA,
+   // end of operator precedence order
+
    UNKNOWN,
 
    IDENT,
 
-   ICONST,
-   U_ICONST,
-   L_ICONST,
-   UL_ICONST,
-   LL_ICONST,
-   ULL_ICONST,
-   WB_ICONST,
-   UWB_ICONST,
-
-   FCONST,
-   LITERAL,
+   ICONST, U_ICONST, L_ICONST, UL_ICONST, LL_ICONST, ULL_ICONST,
+   
+   FCONST, DCONST, LDCONST,
+   
+   WB_ICONST, UWB_ICONST,
+   SLITERAL, CLITERAL,
 
    // punctuators
-   L_SQ_BRKT, // [
-   R_SQ_BRKT, // ]
-   L_BRKT, // (
-   R_BRKT, // )
-   L_C_BRKT, // {
-   R_C_BRKT, // }
+   L_BRACKET, R_BRACKET, L_BRACE, R_BRACE, L_C_BRKT, R_C_BRKT,
    PERIOD, // .
    DEREF, // ->
-   INC, // ++
-   DEC, // --
-   BW_AND, // &
-   MUL, // *
-   PLUS, // +
-   MINUS, // -
+
+   INC, DEC, 
+
    BW_INV, // ~
    NEG, // !
-   DIV, // /
-   MOD, // %
-   SHL, // <<
-   SHR, // >>
-   L_P_BRKT, // <
-   R_P_BRKT, // >
-   LE, // <=
-   GE, // >=
-   EQ, // ==
-   NE, // !=
-   BW_XOR, // ^
-   BW_OR, // |
-   L_AND, // &&
-   L_OR, // ||
+
    QMARK, // ?
    COLON, // :
    D_COLON, // ::
    SEMICOLON, // ;
    ELLIPSIS, // ...
-   ASSIGN, // =
-   MUL_ASSIGN, // *=
-   DIV_ASSIGN, // /=
-   MOD_ASSIGN, // %=
-   ADD_ASSIGN, // +=
-   SUB_ASSIGN, // -=
-   SHL_ASSIGN, // <<=
-   SHR_ASSIGN, // >>=
-   BW_AND_ASSIGN, // &=
-   BW_XOR_ASSIGN, // ^=
-   BW_OR_ASSIGN, // |=
-   COMMA, // ,
+
    // todo: #
    // todo: ##
 
    // keywords
-   ALIGNAS,
-   ALIGNOF,
-   AUTO,
-   BOOL,
-   BREAK,
-   CASE,
-   CHAR,
-   CONST,
-   CONSTEXPR,
-   CONTINUE,
-   DEFAULT,
-   DO,
-   DOUBLE,
-   ELSE,
-   ENUM,
-   EXTERN,
-   FALSE,
-   FLOAT,
-   FOR,
-   GOTO,
-   IF,
-   INLINE,
-   INT,
-   LONG,
-   NULLPTR,
-   REGISTER,
-   RESTRICT,
-   RETURN,
-   SHORT,
-   SIGNED,
-   SIZEOF,
-   STATIC,
-   STATIC_ASSERT,
-   STRUCT,
-   SWITCH,
-   THREAD_LOCAL,
-   TRUE,
-   TYPEDEF,
-   TYPEOF,
-   TYPEOF_UNQUAL,
-   UNION,
-   UNSIGNED,
-   VOID,
-   VOLATILE,
-   WHILE,
-   ATOMIC,
-   BITINT,
-   COMPLEX,
-   DECIMAL128,
-   DECIMAL32,
-   DECIMAL64,
-   GENERIC,
-   IMAGINARY,
-   NORETURN,
+   ALIGNAS, ALIGNOF, AUTO, BOOL, BREAK, CASE, CHAR, CONST,
+   CONSTEXPR, CONTINUE, DEFAULT, DO, DOUBLE, ELSE, ENUM, EXTERN,
+   FALSE, FLOAT, FOR, GOTO, IF, INLINE, INT, LONG,
+   NULLPTR, REGISTER, RESTRICT, RETURN, SHORT, SIGNED, SIZEOF, STATIC,
+   STATIC_ASSERT, STRUCT, SWITCH, THREAD_LOCAL, TRUE, TYPEDEF, TYPEOF, TYPEOF_UNQUAL,
+   UNION, UNSIGNED, VOID, VOLATILE, WHILE, ATOMIC, BITINT, COMPLEX,
+   DECIMAL128, DECIMAL32, DECIMAL64, GENERIC, IMAGINARY, NORETURN,
 
    END,
 };
+// clang-format on
 // ---------------------------------------------------------------------------
-std::ostream& operator<<(std::ostream& os, const TokenType& tt);
+std::ostream& operator<<(std::ostream& os, const Kind& tt);
 // ---------------------------------------------------------------------------
 struct GPerfToken {
    const char* keyword;
-   int tokenType = TokenType::UNKNOWN;
+   int tokenType = Kind::UNKNOWN;
 };
 // ---------------------------------------------------------------------------
 class Token {
    public:
-   Token() : type{TokenType::UNKNOWN} {}
+   Token() : type{Kind::UNKNOWN} {}
 
-   explicit Token(double value) : type{TokenType::FCONST}, fvalue{value} {}
+   explicit Token(float value) : type{Kind::FCONST}, fvalue{value} {}
+   explicit Token(double value) : type{Kind::DCONST}, dvalue{value} {}
+   explicit Token(long double value) : type{Kind::LDCONST}, ldvalue{value} {}
 
-   explicit Token(unsigned long long value) : type{TokenType::ULL_ICONST}, ullValue{value} {}
-   explicit Token(unsigned long value) : type{TokenType::UL_ICONST}, ulValue{value} {}
-   explicit Token(unsigned value) : type{TokenType::U_ICONST}, uValue{value} {}
-   explicit Token(long long value) : type{TokenType::LL_ICONST}, llValue{value} {}
-   explicit Token(long value) : type{TokenType::L_ICONST}, lValue{value} {}
-   explicit Token(int value) : type{TokenType::ICONST}, iValue{value} {}
+   explicit Token(unsigned long long value) : type{Kind::ULL_ICONST}, ullValue{value} {}
+   explicit Token(unsigned long value) : type{Kind::UL_ICONST}, ulValue{value} {}
+   explicit Token(unsigned value) : type{Kind::U_ICONST}, uValue{value} {}
+   explicit Token(long long value) : type{Kind::LL_ICONST}, llValue{value} {}
+   explicit Token(long value) : type{Kind::L_ICONST}, lValue{value} {}
+   explicit Token(int value) : type{Kind::ICONST}, iValue{value} {}
 
-   explicit Token(std::string_view value, TokenType type = TokenType::IDENT) : type{type}, ident{value} {}
+   explicit Token(std::string_view value, Kind type = Kind::IDENT) : type{type}, ident{value} {}
 
-   explicit Token(TokenType type) : type{type} {}
-   explicit Token(const GPerfToken& gperfToken) : type{static_cast<TokenType>(gperfToken.tokenType)} {}
+   explicit Token(Kind type) : type{type} {}
+   explicit Token(const GPerfToken& gperfToken) : type{static_cast<Kind>(gperfToken.tokenType)} {}
 
-   TokenType getType() const {
+   Kind getType() const {
       return type;
    }
 
@@ -200,11 +136,17 @@ class Token {
       }
    }
 
+   SrcLoc getLoc() const {
+      return loc_;
+   }
+
    private:
-   TokenType type;
+   Kind type;
    union {
       std::string_view ident;
-      double fvalue;
+      long double ldvalue;
+      double dvalue;
+      float fvalue;
       unsigned long long ullValue;
       unsigned long ulValue;
       unsigned uValue;
@@ -212,10 +154,12 @@ class Token {
       long lValue;
       int iValue;
    };
+   SrcLoc loc_;
 };
 // ---------------------------------------------------------------------------
 std::ostream& operator<<(std::ostream& os, const Token& token);
 // ---------------------------------------------------------------------------
+} // namespace token
 } // namespace qcp
 // ---------------------------------------------------------------------------
 #endif // QCP_TOKEN_H

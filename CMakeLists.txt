@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -Wall -Wextra -Wpedantic")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -Wall -Wextra -Wpedantic -fsanitize=undefined")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
 
 # ---------------------------------------------------------------------------
@@ -41,11 +41,17 @@ set(INCLUDE_H
     "${CMAKE_SOURCE_DIR}/include/token.h"
     "${CMAKE_SOURCE_DIR}/include/tokenizer.h"
     "${CMAKE_SOURCE_DIR}/include/keywords.h"
+    "${CMAKE_SOURCE_DIR}/include/diagnostics.h"
+    "${CMAKE_SOURCE_DIR}/include/parser.h"
+    "${CMAKE_SOURCE_DIR}/include/operator.h"
+    "${CMAKE_SOURCE_DIR}/include/loc.h"
+    "${CMAKE_SOURCE_DIR}/include/type.h"
 )
 
 set(SRC_CC
     "${CMAKE_SOURCE_DIR}/src/token.cc"
-    "${CMAKE_SOURCE_DIR}/src/tokenizer.cc"
+    "${CMAKE_SOURCE_DIR}/src/operator.cc"
+    "${CMAKE_SOURCE_DIR}/src/diagnostics.cc"
 )
 
 set(TOOLS_H
@@ -57,7 +63,7 @@ set(TEST_CC
 )
 
 set(BENCH_CC
-    bench/bm_tokenizer.cc
+    "${CMAKE_SOURCE_DIR}/bench/bm_tokenizer.cc"
 )
 
 # ---------------------------------------------------------------------------

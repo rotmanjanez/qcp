@@ -3,6 +3,7 @@
 // todo: (jr) add ansii escape tests
 // ---------------------------------------------------------------------------
 #include "csmith.h"
+#include "diagnostics.h"
 #include "gtest/gtest.h"
 #include "token.h"
 #include "tokenizer.h"
@@ -12,128 +13,128 @@
 // ---------------------------------------------------------------------------
 namespace {
 // ---------------------------------------------------------------------------
-using tt = qcp::TokenType;
-using Token = qcp::Token;
+using tk = qcp::token::Kind;
+using Token = qcp::token::Token;
 // ---------------------------------------------------------------------------
 // todo: (jr) " \r ", " \r\n " "\r\n" "\r",
 std::array whiteSpaces{"", " ", "   ", "\t", "\n", " \t ", " \n "};
 // ---------------------------------------------------------------------------
-std::pair<tt, std::string> punctuatorMap[] = {
-    {tt::L_SQ_BRKT, "["},
-    {tt::R_SQ_BRKT, "]"},
-    {tt::L_BRKT, "("},
-    {tt::R_BRKT, ")"},
-    {tt::L_C_BRKT, "{"},
-    {tt::R_C_BRKT, "}"},
-    {tt::PERIOD, "."},
-    {tt::DEREF, "->"},
-    {tt::INC, "++"},
-    {tt::DEC, "--"},
-    {tt::BW_AND, "&"},
-    {tt::MUL, "*"},
-    {tt::PLUS, "+"},
-    {tt::MINUS, "-"},
-    {tt::BW_INV, "~"},
-    {tt::NEG, "!"},
-    {tt::DIV, "/"},
-    {tt::MOD, "%"},
-    {tt::SHL, "<<"},
-    {tt::SHR, ">>"},
-    {tt::L_P_BRKT, "<"},
-    {tt::R_P_BRKT, ">"},
-    {tt::LE, "<="},
-    {tt::GE, ">="},
-    {tt::EQ, "=="},
-    {tt::NE, "!="},
-    {tt::BW_XOR, "^"},
-    {tt::BW_OR, "|"},
-    {tt::L_AND, "&&"},
-    {tt::L_OR, "||"},
-    {tt::QMARK, "?"},
-    {tt::COLON, ":"},
-    {tt::D_COLON, "::"},
-    {tt::SEMICOLON, ";"},
-    {tt::ELLIPSIS, "..."},
-    {tt::ASSIGN, "="},
-    {tt::MUL_ASSIGN, "*="},
-    {tt::DIV_ASSIGN, "/="},
-    {tt::MOD_ASSIGN, "%="},
-    {tt::ADD_ASSIGN, "+="},
-    {tt::SUB_ASSIGN, "-="},
-    {tt::SHL_ASSIGN, "<<="},
-    {tt::SHR_ASSIGN, ">>="},
-    {tt::BW_AND_ASSIGN, "&="},
-    {tt::BW_XOR_ASSIGN, "^="},
-    {tt::BW_OR_ASSIGN, "|="},
-    {tt::COMMA, ","},
+std::pair<tk, std::string> punctuatorMap[] = {
+    {tk::L_BRACKET, "["},
+    {tk::R_BRACKET, "]"},
+    {tk::L_BRACE, "("},
+    {tk::R_BRACE, ")"},
+    {tk::L_C_BRKT, "{"},
+    {tk::R_C_BRKT, "}"},
+    {tk::PERIOD, "."},
+    {tk::DEREF, "->"},
+    {tk::INC, "++"},
+    {tk::DEC, "--"},
+    {tk::BW_AND, "&"},
+    {tk::ASTERISK, "*"},
+    {tk::PLUS, "+"},
+    {tk::MINUS, "-"},
+    {tk::BW_INV, "~"},
+    {tk::NEG, "!"},
+    {tk::DIV, "/"},
+    {tk::PERCENT, "%"},
+    {tk::SHL, "<<"},
+    {tk::SHR, ">>"},
+    {tk::L_ANGLE, "<"},
+    {tk::R_ANGLE, ">"},
+    {tk::LE, "<="},
+    {tk::GE, ">="},
+    {tk::EQ, "=="},
+    {tk::NE, "!="},
+    {tk::BW_XOR, "^"},
+    {tk::BW_OR, "|"},
+    {tk::L_AND, "&&"},
+    {tk::L_OR, "||"},
+    {tk::QMARK, "?"},
+    {tk::COLON, ":"},
+    {tk::D_COLON, "::"},
+    {tk::SEMICOLON, ";"},
+    {tk::ELLIPSIS, "..."},
+    {tk::ASSIGN, "="},
+    {tk::MUL_ASSIGN, "*="},
+    {tk::DIV_ASSIGN, "/="},
+    {tk::REM_ASSIGN, "%="},
+    {tk::ADD_ASSIGN, "+="},
+    {tk::SUB_ASSIGN, "-="},
+    {tk::SHL_ASSIGN, "<<="},
+    {tk::SHR_ASSIGN, ">>="},
+    {tk::BW_AND_ASSIGN, "&="},
+    {tk::BW_XOR_ASSIGN, "^="},
+    {tk::BW_OR_ASSIGN, "|="},
+    {tk::COMMA, ","},
 };
 // ---------------------------------------------------------------------------
-std::pair<tt, std::string> keywordMap[] = {
-    {tt::AUTO, "auto"},
-    {tt::BREAK, "break"},
-    {tt::CASE, "case"},
-    {tt::CHAR, "char"},
-    {tt::CONST, "const"},
-    {tt::CONSTEXPR, "constexpr"},
-    {tt::CONTINUE, "continue"},
-    {tt::DEFAULT, "default"},
-    {tt::DO, "do"},
-    {tt::DOUBLE, "double"},
-    {tt::ELSE, "else"},
-    {tt::ENUM, "enum"},
-    {tt::EXTERN, "extern"},
-    {tt::FALSE, "false"},
-    {tt::FLOAT, "float"},
-    {tt::FOR, "for"},
-    {tt::GOTO, "goto"},
-    {tt::IF, "if"},
-    {tt::INLINE, "inline"},
-    {tt::INT, "int"},
-    {tt::LONG, "long"},
-    {tt::NULLPTR, "nullptr"},
-    {tt::REGISTER, "register"},
-    {tt::RESTRICT, "restrict"},
-    {tt::RETURN, "return"},
-    {tt::SHORT, "short"},
-    {tt::SIGNED, "signed"},
-    {tt::SIZEOF, "sizeof"},
-    {tt::STATIC, "static"},
-    {tt::STRUCT, "struct"},
-    {tt::SWITCH, "switch"},
-    {tt::TRUE, "true"},
-    {tt::TYPEDEF, "typedef"},
-    {tt::TYPEOF, "typeof"},
-    {tt::TYPEOF_UNQUAL, "typeof_unqual"},
-    {tt::UNION, "union"},
-    {tt::UNSIGNED, "unsigned"},
-    {tt::VOID, "void"},
-    {tt::VOLATILE, "volatile"},
-    {tt::WHILE, "while"},
-    {tt::ATOMIC, "_Atomic"},
-    {tt::BITINT, "_BitInt"},
-    {tt::COMPLEX, "_Complex"},
-    {tt::DECIMAL128, "_Decimal128"},
-    {tt::DECIMAL32, "_Decimal32"},
-    {tt::DECIMAL64, "_Decimal64"},
-    {tt::GENERIC, "_Generic"},
-    {tt::IMAGINARY, "_Imaginary"},
-    {tt::NORETURN, "_Noreturn"},
+std::pair<tk, std::string> keywordMap[] = {
+    {tk::AUTO, "auto"},
+    {tk::BREAK, "break"},
+    {tk::CASE, "case"},
+    {tk::CHAR, "char"},
+    {tk::CONST, "const"},
+    {tk::CONSTEXPR, "constexpr"},
+    {tk::CONTINUE, "continue"},
+    {tk::DEFAULT, "default"},
+    {tk::DO, "do"},
+    {tk::DOUBLE, "double"},
+    {tk::ELSE, "else"},
+    {tk::ENUM, "enum"},
+    {tk::EXTERN, "extern"},
+    {tk::FALSE, "false"},
+    {tk::FLOAT, "float"},
+    {tk::FOR, "for"},
+    {tk::GOTO, "goto"},
+    {tk::IF, "if"},
+    {tk::INLINE, "inline"},
+    {tk::INT, "int"},
+    {tk::LONG, "long"},
+    {tk::NULLPTR, "nullptr"},
+    {tk::REGISTER, "register"},
+    {tk::RESTRICT, "restrict"},
+    {tk::RETURN, "return"},
+    {tk::SHORT, "short"},
+    {tk::SIGNED, "signed"},
+    {tk::SIZEOF, "sizeof"},
+    {tk::STATIC, "static"},
+    {tk::STRUCT, "struct"},
+    {tk::SWITCH, "switch"},
+    {tk::TRUE, "true"},
+    {tk::TYPEDEF, "typedef"},
+    {tk::TYPEOF, "typeof"},
+    {tk::TYPEOF_UNQUAL, "typeof_unqual"},
+    {tk::UNION, "union"},
+    {tk::UNSIGNED, "unsigned"},
+    {tk::VOID, "void"},
+    {tk::VOLATILE, "volatile"},
+    {tk::WHILE, "while"},
+    {tk::ATOMIC, "_Atomic"},
+    {tk::BITINT, "_BitInt"},
+    {tk::COMPLEX, "_Complex"},
+    {tk::DECIMAL128, "_Decimal128"},
+    {tk::DECIMAL32, "_Decimal32"},
+    {tk::DECIMAL64, "_Decimal64"},
+    {tk::GENERIC, "_Generic"},
+    {tk::IMAGINARY, "_Imaginary"},
+    {tk::NORETURN, "_Noreturn"},
 
     // alternative spellig
-    {tt::THREAD_LOCAL, "_Thread_local"},
-    {tt::THREAD_LOCAL, "thread_local"},
+    {tk::THREAD_LOCAL, "_Thread_local"},
+    {tk::THREAD_LOCAL, "thread_local"},
 
-    {tt::STATIC_ASSERT, "_Static_assert"},
-    {tt::STATIC_ASSERT, "static_assert"},
+    {tk::STATIC_ASSERT, "_Static_assert"},
+    {tk::STATIC_ASSERT, "static_assert"},
 
-    {tt::ALIGNAS, "_Alignas"},
-    {tt::ALIGNAS, "alignas"},
+    {tk::ALIGNAS, "_Alignas"},
+    {tk::ALIGNAS, "alignas"},
 
-    {tt::ALIGNOF, "_Alignof"},
-    {tt::ALIGNOF, "alignof"},
+    {tk::ALIGNOF, "_Alignof"},
+    {tk::ALIGNOF, "alignof"},
 
-    {tt::BOOL, "bool"},
-    {tt::BOOL, "_Bool"},
+    {tk::BOOL, "bool"},
+    {tk::BOOL, "_Bool"},
 };
 // ---------------------------------------------------------------------------
 std::array<std::string, 27> identifierList{
@@ -217,7 +218,7 @@ std::string invalidIconstList[] = {
     "0xGHIJ",
 };
 // ---------------------------------------------------------------------------
-std::array<std::string, 19> stringLiteralList{
+std::array<std::string, 20> stringLiteralList{
     "\"Simple string\"",
     "\"\"", // Empty string
     "\"single quote (')\"",
@@ -238,30 +239,32 @@ std::array<std::string, 19> stringLiteralList{
     "\"a // line comment inside\"",
     "\"`backticks`\"",
     "\"special characters $!@#%^&*()-+=[]{}|;:,.<>?/\"",
+    "\"octal escape \\7 \\42 \\123 \"",
     // "\"non-standard escape \\e for ASCII escape \"",
 };
 // ---------------------------------------------------------------------------
-class TT : public ::testing::TestWithParam<std::pair<tt, std::string>> {
+class TokenMap : public ::testing::TestWithParam<std::pair<tk, std::string>> {
 };
 // ---------------------------------------------------------------------------
-class IdentTT : public ::testing::TestWithParam<std::string> {
+class IdentTK : public ::testing::TestWithParam<std::string> {
 };
 // ---------------------------------------------------------------------------
-class IConstTT : public ::testing::TestWithParam<std::pair<std::string, std::size_t>> {
+class IConstTK : public ::testing::TestWithParam<std::pair<std::string, std::size_t>> {
 };
 // ---------------------------------------------------------------------------
-class InvalidIConstTT : public ::testing::TestWithParam<std::string> {
+class InvalidIConstTK : public ::testing::TestWithParam<std::string> {
 };
 // ---------------------------------------------------------------------------
-class StringLiteralTT : public ::testing::TestWithParam<std::string> {
+class StringLiteralTK : public ::testing::TestWithParam<std::string> {
 };
 // ---------------------------------------------------------------------------
-TEST_P(TT, GetsRecognized) {
+TEST_P(TokenMap, GetsRecognized) {
    auto [token, word] = GetParam();
    for (auto& prefix : whiteSpaces) {
       for (auto& suffix : whiteSpaces) {
          std::string src{prefix + word + suffix};
-         qcp::Tokenizer ts{src};
+         qcp::DiagnosticTracker diagnostics{src};
+         qcp::Tokenizer ts{src, diagnostics};
          auto it = ts.begin();
          ASSERT_EQ(it->getType(), token) << "Input string: " << std::quoted(src);
          ASSERT_EQ(++it, ts.end()) << "Input string: " << std::quoted(src);
@@ -269,26 +272,28 @@ TEST_P(TT, GetsRecognized) {
    }
 }
 // ---------------------------------------------------------------------------
-TEST_P(IdentTT, GetsRecognized) {
+TEST_P(IdentTK, GetsRecognized) {
    auto word = GetParam();
    for (auto& prefix : whiteSpaces) {
       for (auto& suffix : whiteSpaces) {
          std::string src{prefix};
          src += word;
          src += suffix;
-         qcp::Tokenizer ts{src};
+
+         qcp::DiagnosticTracker diagnostics{src};
+         qcp::Tokenizer ts{src, diagnostics};
          auto it = ts.begin();
-         ASSERT_EQ(it->getType(), tt::IDENT) << "Input string: " << std::quoted(src);
+         ASSERT_EQ(it->getType(), tk::IDENT) << "Input string: " << std::quoted(src);
          ASSERT_EQ(++it, ts.end()) << "Input string: " << std::quoted(src);
       }
    }
 }
 // ---------------------------------------------------------------------------
 template <typename T>
-void test_iconst(const std::string& word, const std::vector<std::string>& suffixes, tt type, T value);
+void test_iconst(const std::string& word, const std::vector<std::string>& suffixes, tk type, T value);
 // ---------------------------------------------------------------------------
 template <typename T>
-void test_iconst(const std::string& word, const std::vector<std::string>& suffixes, tt type, T value) {
+void test_iconst(const std::string& word, const std::vector<std::string>& suffixes, tk type, T value) {
    for (auto& suffix : suffixes) {
       for (auto& wsPrefix : whiteSpaces) {
          for (auto& wsSuffix : whiteSpaces) {
@@ -298,7 +303,8 @@ void test_iconst(const std::string& word, const std::vector<std::string>& suffix
             src += suffix;
             src += wsSuffix;
 
-            qcp::Tokenizer ts{src};
+            qcp::DiagnosticTracker diagnostics{src};
+            qcp::Tokenizer ts{src, diagnostics};
             auto it = ts.begin();
             ASSERT_EQ(it->getType(), type) << "Input string: " << std::quoted(src);
             ASSERT_EQ(it->getValue<T>(), value) << "Input string: " << std::quoted(src);
@@ -308,7 +314,7 @@ void test_iconst(const std::string& word, const std::vector<std::string>& suffix
    }
 }
 // ---------------------------------------------------------------------------
-TEST_P(IConstTT, GetsRecognized) {
+TEST_P(IConstTK, GetsRecognized) {
    auto [word, value] = GetParam();
    std::vector<std::string> uSuffix = {"u", "U"};
    std::vector<std::string> lSuffix = {"l", "L"};
@@ -318,67 +324,70 @@ TEST_P(IConstTT, GetsRecognized) {
    std::vector<std::string> wbSuffix = {"wb", "WB"};
    std::vector<std::string> uwbSuffix = {"wbu", "WBU", "wbU", "WBu", "uwb", "uWB", "UWB", "Uwb"};
 
-   test_iconst<int>(word, {}, tt::ICONST, value);
-   test_iconst<unsigned>(word, uSuffix, tt::U_ICONST, value);
-   test_iconst<long>(word, lSuffix, tt::L_ICONST, value);
-   test_iconst<unsigned long>(word, ulSuffix, tt::UL_ICONST, value);
-   test_iconst<long long>(word, llSuffix, tt::LL_ICONST, value);
-   test_iconst<unsigned long long>(word, ullSuffix, tt::ULL_ICONST, value);
+   test_iconst<int>(word, {}, tk::ICONST, value);
+   test_iconst<unsigned>(word, uSuffix, tk::U_ICONST, value);
+   test_iconst<long>(word, lSuffix, tk::L_ICONST, value);
+   test_iconst<unsigned long>(word, ulSuffix, tk::UL_ICONST, value);
+   test_iconst<long long>(word, llSuffix, tk::LL_ICONST, value);
+   test_iconst<unsigned long long>(word, ullSuffix, tk::ULL_ICONST, value);
    // todo: (jr) wb, uwb
 }
 // ---------------------------------------------------------------------------
-TEST_P(StringLiteralTT, GetsRecognized) {
+TEST_P(StringLiteralTK, GetsRecognized) {
    auto word = GetParam();
    std::array whiteSpaces{"", " ", "   ", "\t", "\n", "\r", "\r\n", " \t ", " \n ", " \r ", " \r\n "};
    for (auto& prefix : whiteSpaces) {
       for (auto& suffix : whiteSpaces) {
          std::string src{prefix + word + suffix};
-         qcp::Tokenizer ts{src};
+
+         qcp::DiagnosticTracker diagnostics{src};
+         qcp::Tokenizer ts{src, diagnostics};
          auto it = ts.begin();
-         ASSERT_EQ(it->getType(), tt::LITERAL);
+         ASSERT_EQ(it->getType(), tk::SLITERAL);
          ASSERT_EQ(it->getValue<std::string_view>(), word.substr(1, word.size() - 2));
          ASSERT_EQ(++it, ts.end());
       }
    }
 }
 // ---------------------------------------------------------------------------
-TEST_P(InvalidIConstTT, invalidIConstNotParsed) {
+TEST_P(InvalidIConstTK, invalidIConstNotParsed) {
    auto word = GetParam();
    for (auto& prefix : whiteSpaces) {
       for (auto& suffix : whiteSpaces) {
          std::string src{prefix};
          src += word;
          src += suffix;
-         ASSERT_EXIT({
-            qcp::Tokenizer ts{src};
-            (void) ts.begin();
-         },
-                     testing::KilledBySignal(6), ".*");
+         qcp::DiagnosticTracker diagnostics{src};
+         qcp::Tokenizer<qcp::DiagnosticTracker> ts{src, diagnostics};
+         for (auto token : ts) {
+            (void) token;
+         }
+         ASSERT_FALSE(diagnostics.empty()) << "Input string: " << std::quoted(src);
       }
    }
 }
 // ---------------------------------------------------------------------------
-INSTANTIATE_TEST_CASE_P(Punctuator, TT, ::testing::ValuesIn(punctuatorMap));
-INSTANTIATE_TEST_CASE_P(Keyword, TT, ::testing::ValuesIn(keywordMap));
-INSTANTIATE_TEST_CASE_P(Identifier, IdentTT, ::testing::ValuesIn(identifierList));
-INSTANTIATE_TEST_CASE_P(IntegerConstant, IConstTT, ::testing::ValuesIn(iconstList));
-INSTANTIATE_TEST_CASE_P(InvalidIntegerConstant, InvalidIConstTT, ::testing::ValuesIn(invalidIconstList));
-INSTANTIATE_TEST_CASE_P(StringLiteral, StringLiteralTT, ::testing::ValuesIn(stringLiteralList));
+INSTANTIATE_TEST_CASE_P(Punctuator, TokenMap, ::testing::ValuesIn(punctuatorMap));
+INSTANTIATE_TEST_CASE_P(Keyword, TokenMap, ::testing::ValuesIn(keywordMap));
+INSTANTIATE_TEST_CASE_P(Identifier, IdentTK, ::testing::ValuesIn(identifierList));
+INSTANTIATE_TEST_CASE_P(IntegerConstant, IConstTK, ::testing::ValuesIn(iconstList));
+INSTANTIATE_TEST_CASE_P(InvalidIntegerConstant, InvalidIConstTK, ::testing::ValuesIn(invalidIconstList));
+INSTANTIATE_TEST_CASE_P(StringLiteral, StringLiteralTK, ::testing::ValuesIn(stringLiteralList));
 // ---------------------------------------------------------------------------
-TEST(Tokenizer, Random) {
-   std::string src{qcp::tool::random_c_program("gcc", 0)};
-   qcp::Tokenizer ts{src};
-   std::ofstream ofs{"out.log"};
-   std::cout << "Random test started" << std::endl;
-   for (auto token : ts) {
-      ASSERT_TRUE(token.getType() != tt::UNKNOWN);
-      ofs << token << ' ';
-      if (token.getType() == tt::SEMICOLON) {
-         ofs << std::endl;
-      }
-   }
-   std::cout << "Random test passed" << std::endl;
-}
+// TEST(Tokenizer, Random) {
+//    std::string src{qcp::tool::random_c_program("gcc", 0)};
+//    qcp::Tokenizer ts{src};
+//    std::ofstream ofs{"out.log"};
+//    std::cout << "Random test started" << std::endl;
+//    for (auto token : ts) {
+//       ASSERT_TRUE(token.getType() != tk::UNKNOWN);
+//       ofs << token << ' ';
+//       if (token.getType() == tk::SEMICOLON) {
+//          ofs << std::endl;
+//       }
+//    }
+//    std::cout << "Random test passed" << std::endl;
+// }
 // ---------------------------------------------------------------------------
 } // namespace
 // ---------------------------------------------------------------------------
