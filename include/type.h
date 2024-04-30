@@ -9,14 +9,15 @@
 #include <vector>
 // ---------------------------------------------------------------------------
 namespace qcp {
+namespace type {
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
-struct BaseType;
+struct Base;
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
-class BaseTypeFactory;
+class BaseFactory;
 // ---------------------------------------------------------------------------
-enum class BaseTypeKind {
+enum class Kind {
    // clang-format off
    BOOL, CHAR, SHORT, INT, LONG, LONGLONG,
    
@@ -34,61 +35,112 @@ enum class BaseTypeKind {
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
 class Type {
-   using BTY = BaseType<_IRValueRef>;
-   using Factory = BaseTypeFactory<_IRValueRef>;
+   using Base = Base<_IRValueRef>;
+   using Factory = BaseFactory<_IRValueRef>;
    using Token = token::Token;
 
    template <typename T>
    friend std::ostream& operator<<(std::ostream& os, const Type<T>& ty);
 
-   Type(unsigned short typeIndex) : typeIndex_{typeIndex}, qualifiers{false, false, false} {}
+   explicit Type(unsigned short typeIndex) : typeIndex_{typeIndex} {}
 
    public:
-   Type() : typeIndex_{0}, qualifiers{false, false, false} {}
+   Type() : typeIndex_{0} {}
 
-   explicit Type(BaseTypeKind kind) : typeIndex_{Factory::constructKind(kind)}, qualifiers{false, false, false} {}
+   explicit Type(Kind kind) : typeIndex_{Factory::construct(kind)} {}
 
    static Type discardQualifiers(const Type& other) {
       return Type(other.typeIndex_);
    }
 
-   Type(BaseTypeKind integerKind, bool unsignedTy) : typeIndex_{Factory::constructKind(integerKind, unsignedTy)}, qualifiers{false, false, false} {}
+   Type(Kind integerKind, bool unsignedTy) : typeIndex_{Factory::construct(integerKind, unsignedTy)} {}
 
    static Type ptrTo(const Type& other);
+
+   static Type arrayOf(const Type& base) {
+      return Type{Factory::construct(base, 0, true, false)};
+   }
+
+   static Type arrayOf(const Type& base, size_t size, bool varLen = false, bool unspecifiedSize = false) {
+      return Type{Factory::construct(base, size, unspecifiedSize, varLen)};
+   }
+
+   static Type function(const Type& retTy, const std::vector<Type>& argTys, bool isVarArg = false) {
+      return Type{Factory::construct(retTy, argTys, isVarArg)};
+   }
+
+   static Type qualified(const Type& other, token::Kind kind) {
+      Type ty{other};
+      ty.addQualifier(kind);
+      return ty;
+   }
+
+   void addQualifier(token::Kind kind) {
+      switch (kind) {
+         case token::Kind::CONST:
+            qualifiers.CONST = true;
+            break;
+         case token::Kind::RESTRICT:
+            qualifiers.RESTRICT = true;
+            break;
+         case token::Kind::VOLATILE:
+            qualifiers.VOLATILE = true;
+            break;
+         // todo: case token::Kind::ATOMIC:
+         // todo:    ty.qualifiers.ATOMIC = true;
+         // todo:    break;
+         default:
+            assert(false && "Invalid token::Kind to qualify Type with");
+            break;
+      }
+   }
 
    static Type fromToken(const Token& token);
 
    static Type fromConstToken(const Token& token);
 
    Type promote() const {
-      // todo: assert(baseType().kind <= BaseTypeKind::LONGLONG && "Invalid BaseType::Kind to promote()");
+      // todo: assert(Base().kind <= Kind::LONGLONG && "Invalid Base::Kind to promote()");
       // todo: promote integers
       return Type(*this);
    }
 
    static Type commonRealType(op::Kind op, const Type& lhs, const Type& rhs);
 
-   const BTY& baseType() const {
+   Base& base() const {
       return Factory::getTypes()[typeIndex_];
    }
 
+   unsigned short typeIndex() const {
+      return typeIndex_;
+   }
+
    bool operator==(const Type<_IRValueRef>& other) const {
-      return baseType() == other.baseType();
+      return qualifiers == other.qualifiers && base() == other.base();
    }
 
    auto operator<=>(const Type<_IRValueRef>& other) const {
-      return baseType().rank() <=> other.baseType().rank();
+      return base().rank() <=> other.base().rank();
    }
+
+   operator bool() const {
+      return typeIndex_ != 0;
+   }
+
+   struct qualifiers {
+      bool operator==(const qualifiers& other) const {
+         return CONST == other.CONST && RESTRICT == other.RESTRICT && VOLATILE == other.VOLATILE;
+      }
+
+      bool CONST = false;
+      bool RESTRICT = false;
+      bool VOLATILE = false;
+      // todo: bool ATOMIC = false;
+   } qualifiers;
 
    private:
    // todo: maybe short is not enough
    unsigned short typeIndex_;
-
-   struct qualifiers {
-      bool CONST;
-      bool RESTRICT;
-      bool ATOMIC;
-   } qualifiers;
 };
 // ---------------------------------------------------------------------------
 // todo: _BitInt(N)
@@ -99,29 +151,101 @@ class Type {
 // todo: _Complex long double
 // todo: _Imaginary long double
 template <typename _IRValueRef>
-struct BaseType {
+struct Base {
    using TY = Type<_IRValueRef>;
 
-   static BaseType ptr_t(const TY& ty) {
-      BaseType t{BaseTypeKind::PTR_T};
-      t.ptrTy = ty;
-      return t;
+   Kind kind;
+
+   Base() : kind{Kind::UNDEF} {}
+
+   // todo: (jr) remove this constructor
+   explicit Base(Kind kind) : kind{kind}, unsingedTy{false} {}
+
+   Base(Kind integerKind, bool unsignedTy) : kind{integerKind}, unsingedTy{unsignedTy} {
+      assert(kind >= Kind::BOOL && kind <= Kind::DECIMAL128 && "Invalid Base::Kind for integer");
    }
 
-   BaseTypeKind kind;
+   // pointer type
+   Base(TY ptrTy) : kind{Kind::PTR_T}, ptrTy{ptrTy} {}
 
-   BaseType() : kind{BaseTypeKind::UNDEF} {}
+   // array type
+   Base(TY elemTy, size_t size, bool unspecifiedSize = false, bool varLen = false) : kind{Kind::ARRAY_T}, arrayTy{elemTy, unspecifiedSize, varLen, {size}} {}
 
-   explicit BaseType(BaseTypeKind kind) : kind{kind} {}
-   BaseType(BaseTypeKind integerKind, bool unsignedTy) : kind{integerKind}, unsingedTy{unsignedTy} {
-      assert(kind >= BaseTypeKind::BOOL && kind <= BaseTypeKind::DECIMAL128 && "Invalid BaseType::Kind for integer");
+   // function type
+   // todo: replace with move
+   Base(TY retTy, const std::vector<TY>& argTys, bool isVarArg) : kind{Kind::FN_T}, fnTy{argTys, retTy, isVarArg} {}
+
+   ~Base() {
+      switch (kind) {
+         case Kind::PTR_T:
+            ptrTy.~TY();
+            break;
+         case Kind::STRUCT_T:
+         case Kind::UNION_T:
+            structOrUnionTy.~StructOrUnionTy();
+            break;
+         case Kind::ENUM_T:
+            enumTy.~EnumTy();
+            break;
+         case Kind::FN_T:
+            fnTy.~FnTy();
+            break;
+         case Kind::ARRAY_T:
+            arrayTy.~ArrayTy();
+            break;
+         default:
+            break;
+      }
+   }
+
+   // copy constructor
+   Base(const Base&) = delete;
+
+   // move constructor
+   Base(Base&& other) : kind{other.kind} {
+      (*this) = std::move(other);
+   }
+
+   // copy assignment
+   Base& operator=(const Base&) = delete;
+
+   // move assignment
+   Base& operator=(Base&& other) {
+      if (this == &other) {
+         return *this;
+      }
+
+      kind = other.kind;
+      switch (kind) {
+         case Kind::PTR_T:
+            ptrTy = other.ptrTy;
+            break;
+         case Kind::STRUCT_T:
+         case Kind::UNION_T:
+            structOrUnionTy = std::move(other.structOrUnionTy);
+            break;
+         case Kind::ENUM_T:
+            enumTy = other.enumTy;
+            break;
+         case Kind::FN_T:
+            fnTy = std::move(other.fnTy);
+            break;
+         case Kind::ARRAY_T:
+            arrayTy = other.arrayTy;
+            break;
+         default:
+            unsingedTy = other.unsingedTy;
+            break;
+      }
+
+      return *this;
    }
 
    int rank() const;
 
-   bool operator==(const BaseType& other) const;
+   bool operator==(const Base& other) const;
 
-   auto operator<=>(const BaseType& other) const {
+   auto operator<=>(const Base& other) const {
       return rank() <=> other.rank();
    }
 
@@ -140,20 +264,20 @@ struct BaseType {
    };
 
    // todo: vector in union not possible
-   // std::vector<TY> argTys;
    struct FnTy {
+      std::vector<TY> argTys;
       TY retTy;
       bool isVarArg;
    };
 
    struct ArrayTy {
       TY elemTy;
+      bool unspecifiedSize;
+      bool varSize;
       union {
          size_t fixedSize;
          // See also Example 5 in section 6.7.9.
-         _IRValueRef* varSize;
-         bool unspecifiedSize;
-         bool sizeNotPresent;
+         _IRValueRef* valueRef;
       };
    };
 
@@ -168,24 +292,52 @@ struct BaseType {
 };
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
-class BaseTypeFactory {
-   using BTY = BaseType<_IRValueRef>;
+class BaseFactory {
+   using Base = Base<_IRValueRef>;
+   using TY = Type<_IRValueRef>;
 
    public:
-   static BTY* ptrTo(const Type<_IRValueRef>& other);
+   class DeclTypeBaseRef {
+      public:
+      DeclTypeBaseRef() : typeIndex_{0} {}
+      DeclTypeBaseRef(unsigned short typeIndex) : typeIndex_{typeIndex} {}
+      DeclTypeBaseRef(const TY& ty) : typeIndex_{ty.typeIndex()} {}
 
-   static unsigned short constructKind(BaseTypeKind kind);
+      TY& operator*() const {
+         Base& base = BaseFactory::getTypes()[typeIndex_];
+         switch (base.kind) {
+            case Kind::PTR_T:
+               return base.ptrTy;
+            case Kind::ARRAY_T:
+               return base.arrayTy.elemTy;
+            case Kind::ENUM_T:
+               return base.enumTy.underlyingType;
+            case Kind::FN_T:
+               return base.fnTy.retTy;
+            default:
+               assert(false && "Invalid Base::Kind to dereference\n");
+         }
+      }
 
-   static unsigned short constructKind(BaseTypeKind integerKind, bool unsignedTy);
+      operator bool() const {
+         return typeIndex_ != 0;
+      }
 
-   static const std::vector<BTY>& getTypes();
+      private:
+      unsigned short typeIndex_;
+   };
+
+   template <typename... Args>
+   static unsigned short construct(Args... args);
+
+   static std::vector<Base>& getTypes();
 
    private:
-   static std::vector<BTY> types;
+   static std::vector<Base> types;
 };
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
-std::ostream& operator<<(std::ostream& os, const BaseType<_IRValueRef>& ty) {
+std::ostream& operator<<(std::ostream& os, const Base<_IRValueRef>& ty) {
    static const char* names[] = {
        // clang-format off
       "bool", "char", "short", "int", "long", "long long",
@@ -196,42 +348,46 @@ std::ostream& operator<<(std::ostream& os, const BaseType<_IRValueRef>& ty) {
       "undef",
        // clang-format on
    };
-   if ((ty.kind < BaseTypeKind::FLOAT || (ty.kind >= BaseTypeKind::DECIMAL32 && ty.kind <= BaseTypeKind::DECIMAL128)) && ty.unsingedTy) {
+   if ((ty.kind < Kind::FLOAT || (ty.kind >= Kind::DECIMAL32 && ty.kind <= Kind::DECIMAL128)) && ty.unsingedTy) {
       os << "unsigned ";
    }
-   if (ty.kind <= BaseTypeKind::VOID) {
+   if (ty.kind <= Kind::VOID) {
       os << names[static_cast<int>(ty.kind)];
    } else {
       switch (ty.kind) {
-         case BaseTypeKind::PTR_T:
-            os << ty.ptrTy << "*";
+         case Kind::PTR_T:
+            os << "ptr to " << ty.ptrTy;
             break;
-         case BaseTypeKind::ARRAY_T:
-            // todo: differnt array sizes
-            os << ty.arrayTy.elemTy << "[" << ty.arrayTy.fixedSize << "]";
+         case Kind::ARRAY_T:
+            os << "array of " << ty.arrayTy.elemTy;
             break;
-         case BaseTypeKind::STRUCT_T:
+         case Kind::STRUCT_T:
             // todo: name / anonymous
             os << "struct";
             break;
-         case BaseTypeKind::ENUM_T:
+         case Kind::ENUM_T:
             // todo: name / anonymous
             os << "enum";
             break;
-         case BaseTypeKind::UNION_T:
+         case Kind::UNION_T:
             // todo: name / anonymous
             os << "union";
             break;
-         case BaseTypeKind::FN_T:
+         case Kind::FN_T:
             // todo: varargs
-            os << ty.fnTy.retTy << " fn(";
-            // todo: for (auto& arg : ty.fnTy.argTys) {
-            // todo:    os << arg << ", ";
-            // todo: }
-            os << "missing args";
-            os << ")";
+            // todo: args
+            os << "function ";
+            if (!ty.fnTy.argTys.empty()) {
+               os << "taking ";
+               for (const auto& argTy : ty.fnTy.argTys) {
+                  os << argTy
+                     << (argTy == ty.fnTy.argTys.back() ? ' ' : ',');
+               }
+               os << "and ";
+            }
+            os << "returning " << ty.fnTy.retTy;
             break;
-         case BaseTypeKind::UNDEF:
+         case Kind::UNDEF:
             os << "undef";
             break;
          default:
@@ -250,10 +406,13 @@ std::ostream& operator<<(std::ostream& os, const Type<_IRValueRef>& ty) {
    if (ty.qualifiers.RESTRICT) {
       os << "restrict ";
    }
-   if (ty.qualifiers.ATOMIC) {
-      os << "_Atomic ";
+   if (ty.qualifiers.VOLATILE) {
+      os << "volatile ";
    }
-   os << ty.baseType();
+   // todo: if (ty.qualifiers.ATOMIC) {
+   // todo:    os << "_Atomic ";
+   // todo: }
+   os << ty.base();
    return os;
 }
 // ---------------------------------------------------------------------------
@@ -281,23 +440,23 @@ Type<_IRValueRef> Type<_IRValueRef>::fromConstToken(const Token& token) {
    if (hasSigness) {
       tkVal -= static_cast<int>(token::Kind::ICONST);
       // compensate for duplicate tokens with signess
-      tVal = static_cast<int>(BaseTypeKind::INT) + tkVal / 2;
+      tVal = static_cast<int>(Kind::INT) + tkVal / 2;
    } else {
-      tVal = static_cast<int>(BaseTypeKind::FLOAT) + tkVal - static_cast<int>(token::Kind::FCONST);
+      tVal = static_cast<int>(Kind::FLOAT) + tkVal - static_cast<int>(token::Kind::FCONST);
    }
 
-   return Type(static_cast<BaseTypeKind>(tVal), hasSigness && (tkVal & 1));
+   return Type(static_cast<Kind>(tVal), hasSigness && (tkVal & 1));
 }
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
 Type<_IRValueRef> Type<_IRValueRef>::ptrTo(const Type<_IRValueRef>& other) {
-   return {BTY::ptr_t(other)};
+   return Type{Factory::construct(other)};
 }
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
 Type<_IRValueRef> Type<_IRValueRef>::commonRealType(op::Kind kind, const Type& lhs, const Type& rhs) {
    // todo: undef not necessary in when type of identifier is known
-   if (lhs.baseType().kind == BaseTypeKind::UNDEF || rhs.baseType().kind == BaseTypeKind::UNDEF) {
+   if (lhs.base().kind == Kind::UNDEF || rhs.base().kind == Kind::UNDEF) {
       return Type();
    }
 
@@ -311,7 +470,7 @@ Type<_IRValueRef> Type<_IRValueRef>::commonRealType(op::Kind kind, const Type& l
 
    const Type& higher = lhs > rhs ? lhs : rhs;
 
-   if (higher.baseType().kind >= BaseTypeKind::FLOAT) {
+   if (higher.base().kind >= Kind::FLOAT) {
       return Type::discardQualifiers(higher);
    }
    // todo: enums
@@ -324,12 +483,12 @@ Type<_IRValueRef> Type<_IRValueRef>::commonRealType(op::Kind kind, const Type& l
    if (lhsPromoted == rhsPromoted) {
       std::cout << "lhsPromoted == rhsPromoted\n";
       return Type::discardQualifiers(lhsPromoted);
-   } else if (lhsPromoted.baseType().unsingedTy == rhsPromoted.baseType().unsingedTy) {
+   } else if (lhsPromoted.base().unsingedTy == rhsPromoted.base().unsingedTy) {
       std::cout << "same signess\n";
       return Type::discardQualifiers(lhsPromoted > rhsPromoted ? lhsPromoted : rhsPromoted);
    } else {
-      const Type& unsignedTy = lhsPromoted.baseType().unsingedTy ? lhsPromoted : rhsPromoted;
-      const Type& signedTy = lhsPromoted.baseType().unsingedTy ? rhsPromoted : lhsPromoted;
+      const Type& unsignedTy = lhsPromoted.base().unsingedTy ? lhsPromoted : rhsPromoted;
+      const Type& signedTy = lhsPromoted.base().unsingedTy ? rhsPromoted : lhsPromoted;
       if (unsignedTy >= signedTy) {
          std::cout << "unsignedTy >= signedTy\n";
          return Type::discardQualifiers(unsignedTy);
@@ -338,45 +497,45 @@ Type<_IRValueRef> Type<_IRValueRef>::commonRealType(op::Kind kind, const Type& l
          return Type::discardQualifiers(signedTy);
       } else {
          std::cout << "signed but unsigned\n";
-         return Type(signedTy.baseType().kind, true);
+         return Type(signedTy.base().kind, true);
       }
    }
 }
 // ---------------------------------------------------------------------------
-// BaseType
+// Base
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
-bool BaseType<_IRValueRef>::operator==(const BaseType& other) const {
+bool Base<_IRValueRef>::operator==(const Base& other) const {
    if (kind != other.kind) {
       return false;
    }
 
    switch (kind) {
-      case BaseTypeKind::CHAR:
-      case BaseTypeKind::SHORT:
-      case BaseTypeKind::INT:
-      case BaseTypeKind::LONG:
-      case BaseTypeKind::LONGLONG:
-      case BaseTypeKind::FLOAT:
-      case BaseTypeKind::DOUBLE:
-      case BaseTypeKind::LONGDOUBLE:
-      case BaseTypeKind::DECIMAL32:
-      case BaseTypeKind::DECIMAL64:
-      case BaseTypeKind::DECIMAL128:
+      case Kind::CHAR:
+      case Kind::SHORT:
+      case Kind::INT:
+      case Kind::LONG:
+      case Kind::LONGLONG:
+      case Kind::FLOAT:
+      case Kind::DOUBLE:
+      case Kind::LONGDOUBLE:
+      case Kind::DECIMAL32:
+      case Kind::DECIMAL64:
+      case Kind::DECIMAL128:
          return unsingedTy == other.unsingedTy;
-      case BaseTypeKind::BOOL:
-      case BaseTypeKind::NULLPTR_T:
-      case BaseTypeKind::VOID:
+      case Kind::BOOL:
+      case Kind::NULLPTR_T:
+      case Kind::VOID:
          return true;
-      case BaseTypeKind::PTR_T:
+      case Kind::PTR_T:
          return ptrTy == other.ptrTy;
-      case BaseTypeKind::STRUCT_T:
+      case Kind::STRUCT_T:
          return structOrUnionTy.tag == other.structOrUnionTy.tag;
-      case BaseTypeKind::ENUM_T:
+      case Kind::ENUM_T:
          return enumTy.tag == other.enumTy.tag;
-      case BaseTypeKind::FN_T:
+      case Kind::FN_T:
          return fnTy.retTy == other.fnTy.retTy && fnTy.isVarArg == other.fnTy.isVarArg;
-      case BaseTypeKind::ARRAY_T:
+      case Kind::ARRAY_T:
          return arrayTy.elemTy == other.arrayTy.elemTy && arrayTy.fixedSize == other.arrayTy.fixedSize;
       default:
          return false;
@@ -384,62 +543,46 @@ bool BaseType<_IRValueRef>::operator==(const BaseType& other) const {
 }
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
-int BaseType<_IRValueRef>::rank() const {
-   if (kind == BaseTypeKind::ENUM_T) {
-      return enumTy.underlyingType.baseType().rank();
+int Base<_IRValueRef>::rank() const {
+   if (kind == Kind::ENUM_T) {
+      return enumTy.underlyingType.base().rank();
    }
-   if (kind == BaseTypeKind::UNDEF) {
+   if (kind == Kind::UNDEF) {
       // todo: (jr) how to handle this?
       return -1;
    }
-   assert(kind <= BaseTypeKind::DECIMAL128 && "Invalid BaseType::Kind to rank()");
+   assert(kind <= Kind::DECIMAL128 && "Invalid Base::Kind to rank()");
 
    return static_cast<int>(kind);
 }
 // ---------------------------------------------------------------------------
-// BaseTypeFactory
+// BaseFactory
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
-std::vector<BaseType<_IRValueRef>> BaseTypeFactory<_IRValueRef>::types{BTY()};
+std::vector<Base<_IRValueRef>> BaseFactory<_IRValueRef>::types{};
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
-BaseTypeFactory<_IRValueRef>::BTY* BaseTypeFactory<_IRValueRef>::ptrTo(const Type<_IRValueRef>& other) {
-   auto it = std::find_if(types.begin(), types.end(), [&other](const BTY& t) { return t.kind == BaseTypeKind::PTR_T && t.ptrTy == other; });
-   if (it != types.end()) {
-      return &*it;
+template <typename... Args>
+unsigned short BaseFactory<_IRValueRef>::construct(Args... args) {
+   if (types.empty()) {
+      types.emplace_back(Kind::UNDEF);
    }
-   types.push_back(BTY::ptr_t(other));
-   return &types.back();
-}
-// ---------------------------------------------------------------------------
-template <typename _IRValueRef>
-unsigned short BaseTypeFactory<_IRValueRef>::constructKind(BaseTypeKind kind) {
-   auto it = std::find_if(types.begin(), types.end(), [kind](const BTY& t) { return t.kind == kind; });
-   if (it != types.end()) {
-      return std::distance(types.begin(), it);
-   }
-   BTY t{kind};
-   types.push_back(t);
-   return types.size() - 1;
-}
-// ---------------------------------------------------------------------------
-template <typename _IRValueRef>
-unsigned short BaseTypeFactory<_IRValueRef>::constructKind(BaseTypeKind integerKind, bool unsignedTy) {
-   assert(integerKind >= BaseTypeKind::BOOL && integerKind <= BaseTypeKind::DECIMAL128 && "Invalid BaseType::Kind for integer");
 
-   auto it = std::find_if(types.begin(), types.end(), [integerKind, unsignedTy](const BTY& t) { return t.kind == integerKind && t.unsingedTy == unsignedTy; });
+   auto it = std::find(types.begin(), types.end(), Base(args...));
+
    if (it != types.end()) {
       return std::distance(types.begin(), it);
    }
-   types.push_back(BTY(integerKind, unsignedTy));
+   types.emplace_back(args...);
    return types.size() - 1;
 }
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
-const std::vector<typename BaseTypeFactory<_IRValueRef>::BTY>& BaseTypeFactory<_IRValueRef>::getTypes() {
+std::vector<typename BaseFactory<_IRValueRef>::Base>& BaseFactory<_IRValueRef>::getTypes() {
    return types;
 }
 // ---------------------------------------------------------------------------
+} // namespace type
 } // namespace qcp
 // ---------------------------------------------------------------------------
 #endif // QCP_TYPE_H

@@ -65,6 +65,12 @@ class Tokenizer {
          return token_ <=> other.token_;
       }
 
+      token::Kind peek() const {
+         auto next = *this;
+         ++next;
+         return next->getType();
+      }
+
       private:
       sv_it getNumberConst(sv_it begin);
       sv_it getPunctuator(sv_it begin);

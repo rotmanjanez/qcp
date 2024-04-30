@@ -58,14 +58,27 @@ std::ostream& operator<<(std::ostream& os, const Kind& tt) {
       "SEMICOLON",
       "ELLIPSIS",
        
-       "ALIGNAS", "ALIGNOF", "AUTO", "BOOL", "BREAK", "CASE", "CHAR", "CONST",
-       "CONSTEXPR", "CONTINUE", "DEFAULT", "DO", "DOUBLE", "ELSE", "ENUM", "EXTERN",
-       "FALSE", "FLOAT", "FOR", "GOTO", "IF", "INLINE", "INT", "LONG",
-       "NULLPTR", "REGISTER", "RESTRICT", "RETURN", "SHORT", "SIGNED", "SIZEOF", "STATIC",
-       "STATIC_ASSERT", "STRUCT", "SWITCH", "THREAD_LOCAL", "TRUE", "TYPEDEF", "TYPEOF", "TYPEOF_UNQUAL",
-       "UNION", "UNSIGNED", "VOID", "VOLATILE", "WHILE", "ATOMIC", "BITINT", "COMPLEX",
-       "DECIMAL128", "DECIMAL32", "DECIMAL64", "GENERIC", "IMAGINARY", "NORETURN",
-       "END",
+      "AUTO", "CONSTEXPR", "EXTERN", "REGISTER", "STATIC", "THREAD_LOCAL",
+
+      "INLINE", "NORETURN",
+
+      "SWITCH", "BREAK", "CASE", "CONTINUE", "DEFAULT", "WHILE", "DO", "ELSE", "FOR", "GOTO", "IF", "RETURN",
+      "FALSE", "TRUE", "NULLPTR",
+
+      "STATIC_ASSERT", "SIZEOF", "ALIGNOF",
+      "GENERIC", "IMAGINARY",
+
+      "VOID", "CHAR", "SHORT", "INT", "LONG", "FLOAT", "DOUBLE", "SIGNED", "UNSIGNED",
+      "BITINT", "BOOL", "COMPLEX",
+      "DECIMAL32", "DECIMAL64", "DECIMAL128",
+
+      "STRUCT", "UNION", "ENUM",
+      "TYPEDEF", "TYPEOF", "TYPEOF_UNQUAL",
+
+      "CONST", "RESTRICT", "VOLATILE", "ATOMIC",
+      "ALIGNAS",
+
+      "END",
    };
    // clang-format on
    os << wordmap[static_cast<int>(tt)];

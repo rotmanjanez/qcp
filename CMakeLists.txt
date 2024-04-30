@@ -14,6 +14,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -Wall -Wextra -Wpedantic -fsanitize=undefined")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+set(SCMAKE_CXX_COMPILER "g++")
 
 # ---------------------------------------------------------------------------
 # Dependencies
@@ -46,6 +47,7 @@ set(INCLUDE_H
     "${CMAKE_SOURCE_DIR}/include/operator.h"
     "${CMAKE_SOURCE_DIR}/include/loc.h"
     "${CMAKE_SOURCE_DIR}/include/type.h"
+    "${CMAKE_SOURCE_DIR}/include/tracer.h"
 )
 
 set(SRC_CC
@@ -59,7 +61,9 @@ set(TOOLS_H
 )
 
 set(TEST_CC
-    "${CMAKE_SOURCE_DIR}/test/test_tokenizer.cc"
+
+    # "${CMAKE_SOURCE_DIR}/test/test_tokenizer.cc"
+    "${CMAKE_SOURCE_DIR}/test/test_types.cc"
 )
 
 set(BENCH_CC
