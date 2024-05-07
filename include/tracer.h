@@ -18,17 +18,25 @@ class EXIT : public std::string {
 class Tracer {
    private:
    std::ostream* os;
-   std::vector<int> branches; // Keeps track of branching at each level
+   int indent = 0;
    bool newLine;
 
    // Function to print the current indentation and branching
-   void printIndent() {
+   void printIndent(bool normalLog = true) {
+      if (indent > 20) {
+         // todo: remove
+         throw std::runtime_error("Indentation limit reached");
+      }
       if (newLine) {
-         for (size_t i = 0; i < branches.size(); ++i) {
-            if (i + 1 == branches.size()) {
-               *os << (branches[i] ? "└── " : "├── ");
+         for (int i = 0; i < indent; ++i) {
+            if (i + 1 == indent) {
+               if (normalLog) {
+                  *os << "|   ";
+               } else {
+                  *os << "├── ";
+               }
             } else {
-               *os << (branches[i] ? "    " : "|   ");
+               *os << "|   ";
             }
          }
          newLine = false;
@@ -53,23 +61,18 @@ class Tracer {
 
    Tracer& operator<<(const ENTER& enter) {
       newLine = true;
-      printIndent();
+      printIndent(false);
       *os << "enter " << static_cast<std::string>(enter) << std::endl;
       newLine = true;
-      branches.push_back(0); // Add a new level with a branching indicator
+      indent++;
       return *this;
    }
 
    Tracer& operator<<(const EXIT&) {
       newLine = true;
+      indent--;
       printIndent();
-      *os << "exit" << std::endl;
-      if (!branches.empty()) {
-         branches.pop_back(); // Remove the last level
-         if (!branches.empty()) {
-            branches.back() = 1; // Mark the last level as ended
-         }
-      }
+      *os << "*" << std::endl;
       newLine = true;
       return *this;
    }
