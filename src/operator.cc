@@ -6,14 +6,18 @@
 namespace qcp {
 namespace op {
 // ---------------------------------------------------------------------------
+Kind getBinOpKind(token::Kind tk) {
+   assert(tk >= token::Kind::ASTERISK && tk <= token::Kind::COMMA && "Invalid token::Kind to get Kind from");
+   assert(tk != token::Kind::QMARK && "Ternary operator not supported"); // todo: (jr) implement ternary operator
+   return static_cast<Kind>(static_cast<int>(Kind::MUL) + static_cast<int>(tk) - static_cast<int>(token::Kind::ASTERISK));
+}
+// ---------------------------------------------------------------------------
 Kind getBinOpKind(const token::Token& token) {
-   assert(token.getType() >= token::Kind::ASTERISK && token.getType() <= token::Kind::COMMA && "Invalid token::Kind to get Kind from");
-   assert(token.getType() != token::Kind::QMARK && "Ternary operator not supported"); // todo: (jr) implement ternary operator
-   return static_cast<Kind>(static_cast<int>(Kind::MUL) + static_cast<int>(token.getType()) - static_cast<int>(token::Kind::ASTERISK));
+   return getBinOpKind(token.getKind());
 }
 // ---------------------------------------------------------------------------
 OpSpec getOpSpec(const token::Token& token) {
-   token::Kind tk = token.getType();
+   token::Kind tk = token.getKind();
    if (tk < token::Kind::ASTERISK || tk > token::Kind::COMMA) {
       return OpSpec{0, false};
    }
