@@ -65,8 +65,14 @@ class Type {
       return Type{Factory::construct(base, size, unspecifiedSize, varLen)};
    }
 
+   // todo: replace with move
    static Type function(const Type& retTy, const std::vector<Type>& argTys, bool isVarArg = false) {
       return Type{Factory::construct(retTy, argTys, isVarArg)};
+   }
+
+   // todo: replace with move
+   static Type structOrUnion(token::Kind tk, const std::vector<Type>& members, bool incomplete) {
+      return Type{Factory::construct(tk, members, incomplete)};
    }
 
    static Type qualified(const Type& other, token::Kind kind) {
@@ -175,6 +181,11 @@ struct Base {
    // todo: replace with move
    Base(TY retTy, const std::vector<TY>& argTys, bool isVarArg) : kind{Kind::FN_T}, fnTy{argTys, retTy, isVarArg} {}
 
+   // Struct or Union type
+   Base(token::Kind tk, std::vector<TY> members, bool incomplete) : kind{tk == token::Kind::STRUCT ? Kind::STRUCT_T : Kind::UNION_T}, structOrUnionTy{incomplete, 0, members} {
+      assert(tk == token::Kind::STRUCT || tk == token::Kind::UNION && "Invalid token::Kind for struct or union");
+   }
+
    ~Base() {
       switch (kind) {
          case Kind::PTR_T:
@@ -251,8 +262,8 @@ struct Base {
 
    struct StructOrUnionTy {
       bool incomplete;
-      bool isStruct;
       unsigned tag;
+      std::vector<TY> members;
       // todo: XXX attributes; // e.g. __attribute__((packed))
       // todo: XXX members; // might have flexible array member; might have bitfields; might be anonymous union or structures, might have alignas()
    };
@@ -315,7 +326,20 @@ class BaseFactory {
             case Kind::FN_T:
                return base.fnTy.retTy;
             default:
+               std::cerr << "Invalid Base::Kind to dereference: " << base << "\n";
                assert(false && "Invalid Base::Kind to dereference\n");
+         }
+         // todo: what to return here?
+      }
+
+      void chain(TY ty) {
+         DeclTypeBaseRef& _this = *this;
+
+         if (_this) {
+            *_this = ty;
+            _this = DeclTypeBaseRef(*_this);
+         } else {
+            _this = DeclTypeBaseRef(ty);
          }
       }
 
@@ -362,16 +386,21 @@ std::ostream& operator<<(std::ostream& os, const Base<_IRValueRef>& ty) {
             os << "array of " << ty.arrayTy.elemTy;
             break;
          case Kind::STRUCT_T:
+         case Kind::UNION_T:
             // todo: name / anonymous
-            os << "struct";
+            if (ty.kind == Kind::STRUCT_T) {
+               os << "struct { ";
+            } else {
+               os << "union { ";
+            }
+            for (const auto& member : ty.structOrUnionTy.members) {
+               os << member << "; ";
+            }
+            os << '}';
             break;
          case Kind::ENUM_T:
             // todo: name / anonymous
             os << "enum";
-            break;
-         case Kind::UNION_T:
-            // todo: name / anonymous
-            os << "union";
             break;
          case Kind::FN_T:
             // todo: varargs
@@ -384,6 +413,9 @@ std::ostream& operator<<(std::ostream& os, const Base<_IRValueRef>& ty) {
                      << (argTy == ty.fnTy.argTys.back() ? ' ' : ',');
                }
                os << "and ";
+            }
+            if (ty.fnTy.isVarArg) {
+               os << "accepting any number of arguments and ";
             }
             os << "returning " << ty.fnTy.retTy;
             break;
@@ -420,7 +452,7 @@ std::ostream& operator<<(std::ostream& os, const Type<_IRValueRef>& ty) {
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
 Type<_IRValueRef> Type<_IRValueRef>::fromToken(const Token& token) {
-   token::Kind tk = token.getType();
+   token::Kind tk = token.getKind();
    if (tk >= token::Kind::ICONST && tk <= token::Kind::LDCONST) {
       return fromConstToken(token);
    }
@@ -430,7 +462,7 @@ Type<_IRValueRef> Type<_IRValueRef>::fromToken(const Token& token) {
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
 Type<_IRValueRef> Type<_IRValueRef>::fromConstToken(const Token& token) {
-   token::Kind tk = token.getType();
+   token::Kind tk = token.getKind();
    assert(tk >= token::Kind::ICONST && tk <= token::Kind::LDCONST && "Invalid token::Kind to create Type from");
 
    int tkVal = static_cast<int>(tk);
@@ -559,7 +591,7 @@ int Base<_IRValueRef>::rank() const {
 // BaseFactory
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
-std::vector<Base<_IRValueRef>> BaseFactory<_IRValueRef>::types{};
+std::vector<Base<_IRValueRef>> BaseFactory<_IRValueRef>::types(1);
 // ---------------------------------------------------------------------------
 template <typename _IRValueRef>
 template <typename... Args>
