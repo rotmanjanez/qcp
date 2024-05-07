@@ -5,6 +5,7 @@
 // ---------------------------------------------------------------------------
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 // ---------------------------------------------------------------------------
@@ -37,6 +38,7 @@ class DiagnosticMessage {
 std::ostream& operator<<(std::ostream& os, const DiagnosticMessage& diag);
 // ---------------------------------------------------------------------------
 class DiagnosticTracker {
+   friend std::ostream& operator<<(std::ostream& os, const DiagnosticTracker& tracker);
    // todo: (jr) make this a singleton and change methods to static
    public:
    explicit DiagnosticTracker(std::string_view prog) : prog_{prog} {}
@@ -57,15 +59,25 @@ class DiagnosticTracker {
       lineBreaks_.push_back(pos);
    }
 
-   friend std::ostream& operator<<(std::ostream& os, const DiagnosticTracker& tracker);
+   template <typename T>
+   DiagnosticTracker& operator<<(const T& value) {
+      os_ << value;
+      return *this;
+   }
+
+   DiagnosticTracker& operator<<(std::ostream& (*pf)(std::ostream&) ) {
+      pf(os_);
+      if (pf == static_cast<std::ostream& (*) (std::ostream&)>(std::endl)) {
+         std::cerr << os_.str() << std::endl;
+         report(DiagnosticMessage(os_.str(), loc_));
+         os_.clear();
+         loc_ = {};
+      }
+      return *this;
+   }
 
    const std::string_view getSource(const SrcLoc& loc) const {
       return prog_.substr(loc.loc, loc.len);
-   }
-
-   DiagnosticTracker& operator<<(DiagnosticMessage diag) {
-      report(diag);
-      return *this;
    }
 
    DiagnosticTracker& operator<<(SrcLoc loc) {
@@ -73,13 +85,8 @@ class DiagnosticTracker {
       return *this;
    }
 
-   template <typename T>
-   DiagnosticTracker& operator<<(T message) {
-      report(DiagnosticMessage(std::forward<T>(message), loc_));
-      return *this;
-   }
-
    private:
+   std::stringstream os_{};
    SrcLoc loc_{};
    std::vector<DiagnosticMessage> diagnostics_{};
    std::vector<std::size_t> lineBreaks_{};
