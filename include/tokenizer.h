@@ -5,6 +5,7 @@
 // ---------------------------------------------------------------------------
 #include "diagnostics.h"
 #include "keywords.h"
+#include "stringpool.h"
 #include "tokenizer.h"
 // ---------------------------------------------------------------------------
 #include <algorithm>
@@ -68,7 +69,7 @@ class Tokenizer {
       token::Kind peek() const {
          auto next = *this;
          ++next;
-         return next->getType();
+         return next->getKind();
       }
 
       private:
@@ -241,13 +242,13 @@ sv_it getCharSequence(sv_it begin, sv_it end, _DiagnosticTracker& diagnostics) {
    while (cSeqEnd != end) {
       cSeqEnd = std::find_if(cSeqEnd, end, [](const char c) { return c == '\\' || c == '"' || c == '\n'; });
       if (cSeqEnd == end) {
-         diagnostics << "unterminated character sequence";
+         diagnostics << "unterminated character sequence" << std::endl;
          break;
       }
 
       if (*cSeqEnd == '\\') {
          if (cSeqEnd + 1 == end) {
-            diagnostics << "unterminated character sequence";
+            diagnostics << "unterminated character sequence" << std::endl;
             break;
          }
          ++cSeqEnd;
@@ -256,7 +257,7 @@ sv_it getCharSequence(sv_it begin, sv_it end, _DiagnosticTracker& diagnostics) {
             int octalCount;
             for (octalCount = 1; octalCount < 3 && (cSeqEnd + octalCount) != end; ++octalCount) {
                if (!isOctalDigit(*(cSeqEnd + octalCount))) {
-                  diagnostics << "invalid octal escape sequence";
+                  diagnostics << "invalid octal escape sequence" << std::endl;
                   break;
                }
             }
@@ -271,16 +272,16 @@ sv_it getCharSequence(sv_it begin, sv_it end, _DiagnosticTracker& diagnostics) {
                ++hexCount;
             }
             if (hexCount == 0) {
-               diagnostics << "invalid hex escape sequence";
+               diagnostics << "invalid hex escape sequence" << std::endl;
             }
             // todo: (jr) handle hex values
          } else if (isSimpleEscapeSequenceChar(*cSeqEnd)) {
             ++cSeqEnd;
          } else {
-            diagnostics << "unknown escape sequence";
+            diagnostics << "unknown escape sequence" << std::endl;
          }
       } else if (*cSeqEnd == '\n') {
-         diagnostics << "unterminated character sequence";
+         diagnostics << "unterminated character sequence" << std::endl;
          break;
       } else {
          // end of sequence found
@@ -326,7 +327,7 @@ sv_it Tokenizer<_DiagnosticTracker>::const_iterator::getNumberConst(sv_it begin)
          // for hex float, strtod expects the '0x' prefix to be included
          begin -= 2;
       } else if (valueEnd == begin) {
-         *diagnostics_ << "invalid hex number";
+         *diagnostics_ << "invalid hex number" << std::endl;
       }
    } else if (*begin == '0' && (second == 'b' or second == 'B')) {
       // binary
@@ -334,7 +335,7 @@ sv_it Tokenizer<_DiagnosticTracker>::const_iterator::getNumberConst(sv_it begin)
       begin += 2;
       valueEnd = findEndOfINumber(begin, prog_.end(), isBinaryDigit, *diagnostics_);
       if (valueEnd == begin) {
-         *diagnostics_ << "invalid binary number";
+         *diagnostics_ << "invalid binary number" << std::endl;
       }
    } else {
       // decimal, octal or decimal-float
@@ -350,7 +351,7 @@ sv_it Tokenizer<_DiagnosticTracker>::const_iterator::getNumberConst(sv_it begin)
       if (!isFloat && *begin == '0') {
          base = 8;
          if (findEndOfINumber(begin + 1, prog_.end(), isOctalDigit, *diagnostics_) != valueEnd) {
-            *diagnostics_ << "invalid octal number";
+            *diagnostics_ << "invalid octal number" << std::endl;
          }
       } else {
          base = 10;
@@ -454,9 +455,9 @@ sv_it Tokenizer<_DiagnosticTracker>::const_iterator::getNumberConst(sv_it begin)
    }
 
    if (errno == ERANGE) {
-      *diagnostics_ << "range error";
+      *diagnostics_ << "range error" << std::endl;
    } else if (pos != valueRepr.c_str() + valueRepr.length()) {
-      *diagnostics_ << "invalid number";
+      *diagnostics_ << "invalid number" << std::endl;
    }
 
    return suffixEnd;
@@ -702,7 +703,7 @@ sv_it Tokenizer<_DiagnosticTracker>::const_iterator::getPunctuator(sv_it begin) 
          break;
       default:
          type = TK::UNKNOWN;
-         *diagnostics_ << "unknown punctuator";
+         *diagnostics_ << "unknown punctuator '" << chars[0] << '\'' << std::endl;
    }
    token_ = Token{type};
    return begin + len;
@@ -766,7 +767,7 @@ Tokenizer<_DiagnosticTracker>::const_iterator& Tokenizer<_DiagnosticTracker>::co
    } else if (*begin == '\'') {
       end = getCCharSequence(begin);
    } else {
-      *diagnostics_ << "unknown token";
+      *diagnostics_ << "unknown token: '" << *begin << '\'' << std::endl;
    }
 
    *diagnostics_ << SrcLoc{static_cast<std::size_t>(std::distance(prog_.begin(), begin)), static_cast<unsigned>(std::distance(begin, end))};
@@ -776,7 +777,7 @@ Tokenizer<_DiagnosticTracker>::const_iterator& Tokenizer<_DiagnosticTracker>::co
    if (requiresSeparator && !prog_.empty()) {
       const char c = prog_.front();
       if (!(isSeparator(c) || isPunctuatorStart(c) || c == ']')) {
-         *diagnostics_ << "token not fully consumed";
+         *diagnostics_ << "token not fully consumed" << std::endl;
       }
    }
 

@@ -4,6 +4,7 @@
 // qcp
 // ---------------------------------------------------------------------------
 #include "loc.h"
+#include "stringpool.h"
 // ---------------------------------------------------------------------------
 #include <cassert>
 #include <iostream>
@@ -93,27 +94,51 @@ struct GPerfToken {
    int tokenType = Kind::UNKNOWN;
 };
 // ---------------------------------------------------------------------------
+struct ConstExprValue {
+   ConstExprValue(long double value) : ld{value} {}
+   ConstExprValue(double value) : d{value} {}
+   ConstExprValue(float value) : f{value} {}
+   ConstExprValue(unsigned long long value) : ull{value} {}
+   ConstExprValue(unsigned long value) : ul{value} {}
+   ConstExprValue(unsigned value) : u{value} {}
+   ConstExprValue(long long value) : ll{value} {}
+   ConstExprValue(long value) : l{value} {}
+   ConstExprValue(int value) : i{value} {}
+
+   union {
+      long double ld;
+      double d;
+      float f;
+      unsigned long long ull;
+      unsigned long ul;
+      unsigned u;
+      long long ll;
+      long l;
+      int i;
+   };
+};
+// ---------------------------------------------------------------------------
 class Token {
    public:
    Token() : type{Kind::UNKNOWN} {}
 
-   explicit Token(float value) : type{Kind::FCONST}, fvalue{value} {}
-   explicit Token(double value) : type{Kind::DCONST}, dvalue{value} {}
-   explicit Token(long double value) : type{Kind::LDCONST}, ldvalue{value} {}
+   explicit Token(float value) : type{Kind::FCONST}, value{value} {}
+   explicit Token(double value) : type{Kind::DCONST}, value{value} {}
+   explicit Token(long double value) : type{Kind::LDCONST}, value{value} {}
 
-   explicit Token(unsigned long long value) : type{Kind::ULL_ICONST}, ullValue{value} {}
-   explicit Token(unsigned long value) : type{Kind::UL_ICONST}, ulValue{value} {}
-   explicit Token(unsigned value) : type{Kind::U_ICONST}, uValue{value} {}
-   explicit Token(long long value) : type{Kind::LL_ICONST}, llValue{value} {}
-   explicit Token(long value) : type{Kind::L_ICONST}, lValue{value} {}
-   explicit Token(int value) : type{Kind::ICONST}, iValue{value} {}
+   explicit Token(unsigned long long value) : type{Kind::ULL_ICONST}, value{value} {}
+   explicit Token(unsigned long value) : type{Kind::UL_ICONST}, value{value} {}
+   explicit Token(unsigned value) : type{Kind::U_ICONST}, value{value} {}
+   explicit Token(long long value) : type{Kind::LL_ICONST}, value{value} {}
+   explicit Token(long value) : type{Kind::L_ICONST}, value{value} {}
+   explicit Token(int value) : type{Kind::ICONST}, value{value} {}
 
    explicit Token(std::string_view value, Kind type = Kind::IDENT) : type{type}, ident{value} {}
 
    explicit Token(Kind type) : type{type} {}
    explicit Token(const GPerfToken& gperfToken) : type{static_cast<Kind>(gperfToken.tokenType)} {}
 
-   Kind getType() const {
+   Kind getKind() const {
       return type;
    }
 
@@ -135,20 +160,20 @@ class Token {
    template <typename T>
    T getValue() const {
       if constexpr (std::is_same_v<T, double>) {
-         return fvalue;
+         return value.f;
       } else if constexpr (std::is_same_v<T, unsigned long long>) {
-         return ullValue;
+         return value.ull;
       } else if constexpr (std::is_same_v<T, unsigned long>) {
-         return ulValue;
+         return value.ul;
       } else if constexpr (std::is_same_v<T, unsigned>) {
-         return uValue;
+         return value.u;
       } else if constexpr (std::is_same_v<T, long long>) {
-         return llValue;
+         return value.ll;
       } else if constexpr (std::is_same_v<T, long>) {
-         return lValue;
+         return value.l;
       } else if constexpr (std::is_same_v<T, int>) {
-         return iValue;
-      } else if constexpr (std::is_same_v<T, std::string_view>) {
+         return value.i;
+      } else if constexpr (std::is_same_v<T, Ident>) {
          return ident;
       } else {
          assert(false && "Unsupported type");
@@ -159,19 +184,15 @@ class Token {
       return loc_;
    }
 
+   ConstExprValue getRawValue() const {
+      return value;
+   }
+
    private:
    Kind type;
    union {
-      std::string_view ident;
-      long double ldvalue;
-      double dvalue;
-      float fvalue;
-      unsigned long long ullValue;
-      unsigned long ulValue;
-      unsigned uValue;
-      long long llValue;
-      long lValue;
-      int iValue;
+      Ident ident;
+      ConstExprValue value;
    };
    SrcLoc loc_;
 };
