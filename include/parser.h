@@ -4,6 +4,7 @@
 // qcp
 // ---------------------------------------------------------------------------
 #include "diagnostics.h"
+#include "expr.h"
 #include "token.h"
 #include "tokenizer.h"
 #include "tracer.h"
@@ -15,61 +16,6 @@
 #include <vector>
 // ---------------------------------------------------------------------------
 namespace qcp {
-// ---------------------------------------------------------------------------
-// some expression tracking necessary for types and operator precedence
-template <typename _TY>
-struct Expr {
-   using TY = _TY;
-   using Token = token::Token;
-   using OpSpec = op::OpSpec;
-   using OpKind = op::Kind;
-
-   explicit Expr(OpKind op) : op{op}, opspec{getOpSpec(token)}, lhs{}, rhs{} {}
-
-   Expr(OpKind op, const TY& ty) : op{op}, opspec{getOpSpec(op)}, ty{ty}, lhs{}, rhs{} {}
-
-   Expr(OpKind op, std::unique_ptr<Expr>&& lhs) : op{op}, opspec{getOpSpec(op)}, ty{lhs->ty}, lhs{std::move(lhs)}, rhs{} {}
-   Expr(OpKind op, std::unique_ptr<Expr>&& lhs, std::unique_ptr<Expr> rhs) : op{op}, opspec{getOpSpec(op)}, ty{TY::commonRealType(op, lhs->ty, rhs->ty)}, lhs{std::move(lhs)}, rhs{std::move(rhs)} {}
-
-   Expr(OpKind op, int8_t precedence, bool lassoc, std::unique_ptr<Expr>&& lhs) : op{op}, opspec{precedence, lassoc}, ty{lhs->ty}, lhs{std::move(lhs)}, rhs{} {}
-   Expr(OpKind op, int8_t precedence, bool lassoc, std::unique_ptr<Expr>&& lhs, std::unique_ptr<Expr>&& rhs) : op{op}, opspec{precedence, lassoc}, lhs{std::move(lhs)}, rhs{std::move(rhs)} {}
-
-   Expr(OpKind op, const TY& ty, std::unique_ptr<Expr>&& lhs) : op{op}, opspec{getOpSpec(op)}, ty{ty}, lhs{std::move(lhs)}, rhs{} {}
-
-   // todo: (jr) tokens can also be identifier and not only constants
-   explicit Expr(const Token& token) : opspec{0, false}, ty{TY::fromToken(token)}, token{token}, lhs{}, rhs{} {}
-
-   OpKind op;
-   OpSpec opspec;
-   TY ty;
-   Token token;
-   // todo: bool isIntConstExpr;
-
-   int evalIntConstExpr() {
-      // todo:
-   }
-
-   std::unique_ptr<Expr> lhs;
-   std::unique_ptr<Expr> rhs;
-
-   void dump(std::ostream& os, int indent = 0) {
-      os << std::string(indent, ' ')
-         << '(' << ty << ") ";
-
-      if (!lhs && !rhs) {
-         os << token << '\n';
-      } else {
-         os << op << '\n';
-      }
-
-      if (lhs) {
-         lhs->dump(os, indent + 2);
-      }
-      if (rhs) {
-         rhs->dump(os, indent + 2);
-      }
-   }
-};
 // ---------------------------------------------------------------------------
 template <typename _DiagnosticTracker>
 class Parser {
@@ -84,24 +30,20 @@ class Parser {
    using TYK = type::Kind;
    using Factory = type::BaseFactory<std::string>;
    using DeclTypeBaseRef = typename Factory::DeclTypeBaseRef;
+   using OpSpec = op::OpSpec;
+
+   using attr_t = Token;
 
    using Expr = Expr<TY>;
    using ssa = std::unique_ptr<Expr>;
 
-   // , _EmmiterT& emitter emitter_{emitter},
    Parser(std::string_view prog, _DiagnosticTracker& diagnostics, std::ostream& logStream = std::cout) : tokenizer_{prog, diagnostics}, pos_{tokenizer_.begin()}, diagnostics_{diagnostics}, tracer_{logStream} {}
 
    void parse() {
-      // emitter_.emitPrologue();
-      // while (pos_ != tokenizer_.end()) {
-      //    parseExpr();
-      // }
-      // emitter_.emitEpilogue();
-
       std::cout << std::string(80, '-') << '\n';
-      auto expr{parseExpr()};
+      auto expr{parseStmt()};
       std::cout << std::string(80, '-') << '\n';
-      expr->dump(std::cout);
+      std::cout << "expression: " << *expr << '\n';
       std::cout << std::string(80, '-') << '\n';
       std::cout << "types:\n";
       for (auto& ty : type::BaseFactory<std::string>::getTypes()) {
@@ -109,30 +51,57 @@ class Parser {
       }
    }
 
-   // todo: private: but how testing?
-   ssa parseExpr(short precedence = 15);
+   ssa parseStmt();
+   ssa parseCompoundStmt();
+   ssa parseUnlabledStmt(const std::vector<attr_t>& attr);
+   ssa parseDeclStmt(const std::vector<attr_t>& attr);
+   ssa parseExpr(short midPrec = 0);
    ssa parsePrimaryExpr();
    TY parseTypeName();
    TY parseSpecifierQualifierList();
-   TY parseDeclarationSpecifierList(bool storageClassSpecifiers, bool functionSpecifiers);
-   void parseMemberDeclaration();
-   void parseOptAttributeSpecifierSequence();
-   std::pair<TY, DeclTypeBaseRef> parseDeclarator();
+   TY parseDeclarationSpecifierList(bool storageClassSpecifiers = true, bool functionSpecifiers = true);
 
-   void expect(TK kind) {
-      if (pos_->getType() == kind) {
+   private:
+   void parseMemberDeclaratorList();
+   std::vector<attr_t> parseOptAttributeSpecifierSequence();
+
+   std::pair<TY, DeclTypeBaseRef> parseDeclarator();
+   std::vector<TY> parseParameterList();
+
+   template <typename... Tokens>
+   Token consumeAnyOf(Tokens... tokens) {
+      static_assert(sizeof...(Tokens) > 0, "consumeAnyOf() must have at least one argument");
+      static_assert((std::is_same_v<TK, Tokens> && ...), "all arguments must be of type TK");
+
+      if (((pos_->getKind() == tokens) || ...)) {
+         Token t{*pos_};
          ++pos_;
-      } else {
-         std::cerr << "Expected '" << kind << " but got " << pos_->getType() << "'\n";
-         assert(false && "Expected token not found");
-         // todo: diagnostics_ << "Expected '" << kind << "'";
+         return t;
       }
+      return Token{};
+   }
+
+   bool parseOpt(TK kind) {
+      if (pos_->getKind() == kind) {
+         ++pos_;
+         return true;
+      }
+      return false;
+   }
+
+   Token expect(TK kind) {
+      if (pos_->getKind() == kind) {
+         Token t{*pos_};
+         ++pos_;
+         return t;
+      }
+      diagnostics_ << "Expected '" << kind << "' but got " << pos_->getKind() << std::endl;
+      return Token{};
    }
 
    tokenizer_t tokenizer_;
    typename tokenizer_t::const_iterator pos_;
-   // _EmmiterT& emitter_;
-   _DiagnosticTracker diagnostics_{};
+   _DiagnosticTracker& diagnostics_{};
    Tracer tracer_;
 };
 // ---------------------------------------------------------------------------
@@ -192,432 +161,281 @@ bool isDeclarationSpecifier(token::Kind kind) {
    return isTypeSpecifierQualifier(kind) || isStorageClassSpecifier(kind) || isFunctionSpecifier(kind);
 }
 // ---------------------------------------------------------------------------
+bool isSelectionStmtStart(token::Kind kind) {
+   return kind == token::Kind::IF || kind == token::Kind::SWITCH;
+}
+// ---------------------------------------------------------------------------
+bool isIterationStmtStart(token::Kind kind) {
+   return kind == token::Kind::WHILE || kind == token::Kind::DO || kind == token::Kind::FOR;
+}
+// ---------------------------------------------------------------------------
+bool isJumpStmtStart(token::Kind kind) {
+   return kind == token::Kind::GOTO || kind == token::Kind::CONTINUE || kind == token::Kind::BREAK || kind == token::Kind::RETURN;
+}
+// ---------------------------------------------------------------------------
+bool isPrimaryBlockStart(token::Kind kind) {
+   return kind == token::Kind::L_C_BRKT || isJumpStmtStart(kind) || isSelectionStmtStart(kind) || isIterationStmtStart(kind);
+}
+// ---------------------------------------------------------------------------
 // Parser
 // ---------------------------------------------------------------------------
 template <typename _DiagnosticTracker>
-Parser<_DiagnosticTracker>::ssa Parser<_DiagnosticTracker>::parseExpr(short precedence) {
+std::vector<typename Parser<_DiagnosticTracker>::TY> Parser<_DiagnosticTracker>::parseParameterList() {
+   std::vector<TY> params;
+   while (isDeclarationSpecifier(pos_->getKind())) {
+      parseOptAttributeSpecifierSequence();
+      TY ty = parseSpecifierQualifierList();
+
+      // todo: (jr) not abstract declarator
+      if (isAbstractDeclaratorStart(pos_->getKind())) {
+         auto [declTy, base] = parseDeclarator();
+         *base = ty;
+         ty = declTy;
+      }
+      params.push_back(ty);
+   }
+   return params;
+}
+// ---------------------------------------------------------------------------
+template <typename _DiagnosticTracker>
+Parser<_DiagnosticTracker>::ssa Parser<_DiagnosticTracker>::parseStmt() {
+   tracer_ << ENTER{"parseStmt"};
+   std::vector<attr_t> attr = parseOptAttributeSpecifierSequence();
+   ssa stmt;
+   ssa expr;
+
+   Token t = *pos_;
+   TK kind = t.getKind();
+   if (kind == TK::CASE || kind == TK::DEFAULT || (kind == TK::IDENT && pos_.peek() == TK::COLON)) {
+      if (consumeAnyOf(TK::CASE)) {
+         // case-statement
+         expr = parseExpr();
+         // todo: assert constant expression
+      } else if (consumeAnyOf(TK::DEFAULT)) {
+         // default-statement
+
+      } else {
+         // labeled-statement
+         expr = std::make_unique<Expr>(t);
+      }
+      expect(TK::COLON);
+      stmt = std::make_unique<Expr>(t, std::move(expr), parseStmt());
+   } else {
+      stmt = parseUnlabledStmt(attr);
+   }
+   tracer_ << EXIT{"parseStmt"};
+   return stmt;
+}
+// ---------------------------------------------------------------------------
+/*
+declaration:
+   attribute-specifier-sequenceopt declaration-specifiers init-declarator-listopt ;
+   
+   static_assert-declaration
+   attribute-declaration
+
+declaration-specifiers:
+   declaration-specifier attribute-specifier-sequenceopt
+   declaration-specifier declaration-specifiers
+
+
+block-item:
+   declaration
+   unlabeled-statement
+   label
+*/
+// ---------------------------------------------------------------------------
+template <typename _DiagnosticTracker>
+Parser<_DiagnosticTracker>::ssa Parser<_DiagnosticTracker>::parseDeclStmt(const std::vector<attr_t>& attr) {
+   // todo: static_assert-declaration
+   tracer_ << ENTER{"parseDeclStmt"};
+
+   if (attr.size() > 0 && consumeAnyOf(TK::SEMICOLON)) {
+      // todo: (jr) attribute declaration
+   } else {
+      TY ty = parseDeclarationSpecifierList();
+
+      tracer_ << "declaration specifier: " << ty << std::endl;
+
+      do {
+         auto [declTy, base] = parseDeclarator();
+         tracer_ << "declaration type: " << declTy << std::endl;
+         *base = ty;
+         if (consumeAnyOf(TK::ASSIGN)) {
+            if (consumeAnyOf(TK::L_C_BRKT)) {
+               // todo: initializer-list
+               tracer_ << " = { ... }" << std::endl;
+               parseOpt(TK::COMMA);
+               expect(TK::R_C_BRKT);
+            } else {
+               // expression
+               auto expr = parseExpr();
+               tracer_ << " = " << *expr << std::endl;
+               // todo: handle semantics
+            }
+         }
+      } while (consumeAnyOf(TK::COMMA));
+      expect(TK::SEMICOLON);
+   }
+
+   tracer_ << EXIT{"parseDeclStmt"};
+   return nullptr;
+}
+// ---------------------------------------------------------------------------
+template <typename _DiagnosticTracker>
+Parser<_DiagnosticTracker>::ssa Parser<_DiagnosticTracker>::parseCompoundStmt() {
+   tracer_ << ENTER{"parseCompoundStmt"};
+   expect(TK::L_C_BRKT);
+
+   ssa stmt;
+   auto attr = parseOptAttributeSpecifierSequence();
+
+   // todo: block-item-list
+   // todo: label
+   if (isDeclarationSpecifier(pos_->getKind())) {
+      stmt = parseDeclStmt(attr);
+   } else {
+      stmt = parseUnlabledStmt(attr);
+   }
+
+   expect(TK::R_C_BRKT);
+   tracer_ << EXIT{"parseCompoundStmt"};
+   return stmt;
+}
+// ---------------------------------------------------------------------------
+template <typename _DiagnosticTracker>
+Parser<_DiagnosticTracker>::ssa Parser<_DiagnosticTracker>::parseUnlabledStmt(const std::vector<attr_t>& attr) {
+   tracer_ << ENTER{"parseUnlabledStmt"};
+   ssa expr;
+   Token t = *pos_;
+   tracer_ << "current token: " << t << std::endl;
+   TK kind = t.getKind();
+   if (kind == TK::L_C_BRKT) {
+      // todo: attribute-specifier-sequenceopt
+      expr = parseCompoundStmt();
+   } else if (isSelectionStmtStart(kind)) {
+      // selection-statement
+      if (consumeAnyOf(TK::IF)) {
+         expect(TK::L_BRACE);
+         ssa cond = parseExpr();
+         expect(TK::R_BRACE);
+         ssa then = parseStmt();
+
+         ssa els;
+         if (consumeAnyOf(TK::ELSE)) {
+            els = parseStmt();
+         }
+         // todo: (jr) stmt is not an expression
+         expr = std::make_unique<Expr>(t, std::move(cond), std::make_unique<Expr>(t, std::move(then), std::move(els)));
+      } else {
+         expect(TK::SWITCH);
+         expect(TK::L_BRACE);
+         ssa cond = parseExpr();
+         expect(TK::R_BRACE);
+         ssa body = parseStmt();
+         expr = std::make_unique<Expr>(t, std::move(cond), std::move(body));
+      }
+   } else if (isIterationStmtStart(kind)) {
+      // iteration-statement
+      ssa cond;
+      ssa body;
+      if (consumeAnyOf(TK::WHILE)) {
+         expect(TK::L_BRACE);
+         cond = parseExpr();
+         expect(TK::R_BRACE);
+         body = parseStmt();
+      } else if (consumeAnyOf(TK::DO)) {
+         body = parseStmt();
+         expect(TK::WHILE);
+         expect(TK::L_BRACE);
+         cond = parseExpr();
+         expect(TK::R_BRACE);
+      } else {
+         expect(TK::FOR);
+         expect(TK::L_BRACE);
+
+         // for ( expressionopt ; expressionopt ; expressionopt ) secondary-block
+         // for ( declaration expressionopt ; expressionopt ) secondary-block
+      }
+   } else if (isJumpStmtStart(kind)) {
+      // jump-statement
+      // todo: (jr) not implemented
+   } else {
+      // expression-statement
+      if (pos_->getKind() != TK::SEMICOLON) {
+         expr = parseExpr();
+      }
+      expect(TK::SEMICOLON);
+      if (!expr && !attr.empty()) {
+         diagnostics_ << "Attribute specifier without expression" << std::endl;
+      }
+   }
+   tracer_ << EXIT{"parseUnlabledStmt"};
+   return expr;
+}
+// ---------------------------------------------------------------------------
+template <typename _DiagnosticTracker>
+Parser<_DiagnosticTracker>::ssa Parser<_DiagnosticTracker>::parseExpr(short midPrec) {
    tracer_ << ENTER{"parseExpr"};
+   tracer_ << "current token: " << *pos_ << std::endl;
+
    ssa lhs = parsePrimaryExpr();
+   tracer_ << "current token: " << *pos_ << std::endl;
+   while (*pos_ && pos_->getKind() != TK::SEMICOLON) {
+      op::OpSpec spec{op::getOpSpec(*pos_)};
 
-   Token cur{*pos_};
-   while (cur.getType() != TK::END) {
-      Token cur{*pos_};
-      op::OpSpec spec{op::getOpSpec(cur)};
-
-      if (spec.precedence > precedence) {
+      if (midPrec && spec.precedence >= midPrec) {
          break;
       }
-      switch (cur.getType()) {
+
+      TK tk = pos_->getKind();
+
+      switch (tk) {
          case TK::END:
          case TK::R_BRACE:
          case TK::R_BRACKET:
+            tracer_ << EXIT{"parseExpr"};
             return lhs;
          case TK::INC:
          case TK::DEC:
-            lhs = std::make_unique<Expr>(cur.getType() == TK::INC ? op::Kind::POSTINC : op::Kind::POSTDEC, std::move(lhs));
+            lhs = std::make_unique<Expr>(tk == TK::INC ? op::Kind::POSTINC : op::Kind::POSTDEC, std::move(lhs));
             ++pos_;
             continue;
          case TK::L_BRACKET:
             ++pos_;
-            lhs = std::make_unique<Expr>(op::Kind::SUBSCRIPT, 1, true, std::move(lhs), parseExpr(15));
-            if (lhs->lhs->opspec.precedence > 1) {
-               auto tmp = std::move(lhs->lhs);
-               lhs->lhs = std::move(tmp->lhs);
-               tmp->lhs = std::move(lhs);
-               lhs = std::move(tmp);
-            }
+            lhs = std::make_unique<Expr>(op::Kind::SUBSCRIPT, 1, true, std::move(lhs), parseExpr());
             expect(TK::R_BRACKET);
             continue;
          case TK::DEREF:
          case TK::PERIOD:
             ++pos_;
-            assert(pos_->getType() == TK::IDENT && "member access"); // todo: (jr) not implemented
-            lhs = std::make_unique<Expr>(cur.getType() == TK::DEREF ? op::Kind::MEMBER_DEREF : op::Kind::MEMBER, std::move(lhs), std::make_unique<Expr>(*pos_));
+            assert(pos_->getKind() == TK::IDENT && "member access"); // todo: (jr) not implemented
+            lhs = std::make_unique<Expr>(tk == TK::DEREF ? op::Kind::MEMBER_DEREF : op::Kind::MEMBER, std::move(lhs), std::make_unique<Expr>(*pos_));
             ++pos_;
             continue;
          case TK::L_BRACE:
             assert(false && "function call and compound literal"); // todo: (jr) not implemented
          default:
             // binary operator
-            // store current token and parse rhs
-            cur = *pos_;
             ++pos_;
       }
 
-      if (cur.getType() == TK::END) {
-         tracer_ << EXIT{"parseExpr"};
-         return lhs;
-      }
-
-      ssa rhs = parseExpr(spec.precedence - spec.leftAssociative);
-
-      if (spec.precedence < lhs->opspec.precedence) {
-         op::Kind op = lhs->op;
-
-         auto tmp = std::move(lhs->rhs);
-         lhs->rhs = std::make_unique<Expr>(op, std::move(tmp), std::move(rhs));
-
-      } else {
-         lhs = std::make_unique<Expr>(op::getBinOpKind(cur), std::move(lhs), std::move(rhs));
-      }
-      cur = *pos_;
+      ssa rhs = parseExpr(spec.precedence + spec.leftAssociative);
+      lhs = std::make_unique<Expr>(op::getBinOpKind(tk), std::move(lhs), std::move(rhs));
    }
    tracer_ << EXIT{"parseExpr"};
    return lhs;
 }
 // ---------------------------------------------------------------------------
 template <typename _DiagnosticTracker>
-std::pair<typename Parser<_DiagnosticTracker>::TY, typename Parser<_DiagnosticTracker>::DeclTypeBaseRef> Parser<_DiagnosticTracker>::parseDeclarator() {
-   tracer_ << ENTER{"parseDeclarator"};
-   Token ident;
-   TY ptrTy;
-   DeclTypeBaseRef base;
-
-   while (pos_->getType() == TK::ASTERISK) {
-      ++pos_;
-      parseOptAttributeSpecifierSequence();
-      // todo: (jr) type-qualifier-list
-      if (base) {
-         *base = TY::ptrTo({});
-         base = DeclTypeBaseRef(*base);
-      } else {
-         ptrTy = TY::ptrTo({});
-         base = DeclTypeBaseRef(ptrTy);
-      }
-      while (isTypeQualifier(pos_->getType())) {
-         ptrTy.addQualifier(pos_->getType());
-         ++pos_;
-      }
-   }
-
-   DeclTypeBaseRef mid;
-   TY ty;
-
-   // direct-declarator
-   if (pos_->getType() == TK::IDENT) {
-      ident = *pos_;
-      ++pos_;
-   } else if (pos_->getType() == TK::L_BRACE) {
-      TK next{pos_.peek()};
-      if (next != TK::L_BRACKET && next != TK::L_BRACE && next != TK::R_BRACE) {
-         // abstract-declarator
-         ++pos_;
-         auto [innerTy, innerBase] = parseDeclarator();
-         ty = innerTy;
-         mid = innerBase;
-
-         expect(TK::R_BRACE);
-      } else {
-         // function-declarator, handled below
-      }
-   } else {
-      diagnostics_ << "Expected identifier or '('";
-   }
-
-   parseOptAttributeSpecifierSequence();
-
-   TK kind = pos_->getType();
-   while (kind == TK::L_BRACKET || kind == TK::L_BRACE) {
-      ++pos_;
-      if (kind == TK::L_BRACKET) {
-         bool static_ = false;
-         bool unspecSize = true;
-         bool varLen = false;
-         std::size_t size = 0;
-
-         // array-declarator
-         if (pos_->getType() == TK::STATIC) {
-            static_ = true;
-            ++pos_;
-         }
-         // todo: (jr) type-qualifier-list
-         if (!static_ && pos_->getType() == TK::STATIC) {
-            static_ = true;
-            ++pos_;
-         }
-
-         if (pos_->getType() == TK::ASTERISK) {
-            unspecSize = true;
-            varLen = true;
-            ++pos_;
-            if (static_) {
-               diagnostics_ << "static and * used together";
-            }
-         } else {
-            // todo: assignment-expression opt
-            // todo: static requires assignment-expression
-            if (pos_->getType() != TK::R_BRACKET) {
-               auto expr = parseExpr(14);
-               assert(expr->ty == TY{TYK::INT} && "array size must be integer");
-               size = expr->token.template getValue<int>();
-               unspecSize = false;
-            }
-         }
-
-         // todo: unspecSize, varLen
-         // todo: static
-         TY arrTy{TY::arrayOf({}, size, varLen, unspecSize)};
-         if (mid) {
-            *mid = arrTy;
-            mid = DeclTypeBaseRef(*mid);
-         } else {
-            ty = arrTy;
-            mid = DeclTypeBaseRef(ty);
-         }
-
-         expect(TK::R_BRACKET);
-      } else {
-         // function-declarator
-         // todo: parameter-type-listopt
-         std::vector<TY> params;
-         bool varargs = false;
-         while (isDeclarationSpecifier(pos_->getType())) {
-            parseOptAttributeSpecifierSequence();
-            TY ty = parseSpecifierQualifierList();
-
-            // todo: (jr) not abstract declarator
-            if (isAbstractDeclaratorStart(pos_->getType())) {
-               auto [declTy, base] = parseDeclarator();
-               *base = ty;
-               ty = declTy;
-            }
-            params.push_back(ty);
-         }
-
-         if (params.size() == 0 && pos_->getType() == TK::ELLIPSIS) {
-            varargs = true;
-            ++pos_;
-         } else if (pos_->getType() == TK::COMMA) {
-            ++pos_;
-            expect(TK::ELLIPSIS);
-            varargs = true;
-         }
-
-         TY fnTy{TY::function({}, params, varargs)};
-         if (mid) {
-            *mid = fnTy;
-            mid = DeclTypeBaseRef(*mid);
-         } else {
-            ty = fnTy;
-            mid = DeclTypeBaseRef(ty);
-         }
-         expect(TK::R_BRACE);
-      }
-      parseOptAttributeSpecifierSequence();
-      kind = pos_->getType();
-   }
-
-   tracer_ << "merging types\n";
-   if (!ty) {
-      ty = ptrTy;
-   } else if (mid) {
-      *mid = ptrTy;
-   }
-
-   if (!base) {
-      if (mid) {
-         base = mid;
-      } else {
-         base = DeclTypeBaseRef(ty);
-      }
-   }
-   tracer_ << EXIT{"parseDeclarator"};
-   return {ty, base};
-}
-// ---------------------------------------------------------------------------
-template <typename _DiagnosticTracker>
-void Parser<_DiagnosticTracker>::parseMemberDeclaration() {
-   parseOptAttributeSpecifierSequence();
-   parseSpecifierQualifierList();
-   do {
-      // todo: (jr) declarator
-      // todo: (jr) bitfield
-   } while (pos_->getType() == TK::COLON);
-}
-// ---------------------------------------------------------------------------
-template <typename _DiagnosticTracker>
-Parser<_DiagnosticTracker>::TY Parser<_DiagnosticTracker>::parseSpecifierQualifierList() {
-   return parseDeclarationSpecifierList(false, false);
-}
-// ---------------------------------------------------------------------------
-template <typename _DiagnosticTracker>
-Parser<_DiagnosticTracker>::TY Parser<_DiagnosticTracker>::parseDeclarationSpecifierList(bool storageClassSpecifiers, bool functionSpecifiers) {
-   // todo: (jr) storageClassSpecifiers and functionSpecifiers not implemented
-   (void) storageClassSpecifiers;
-   (void) functionSpecifiers;
-
-   tracer_ << ENTER{"parseDeclarationSpecifierList"};
-   TY ty;
-   Token ident;
-
-   TokenCounter<TK::CHAR, TK::DECIMAL128> tycount{};
-   bool qualifiers[3] = {false, false, false};
-
-   for (Token t = *pos_; t.getType() >= TK::VOID && t.getType() <= TK::ALIGNAS; t = *++pos_) {
-      TK type = t.getType();
-
-      if (isTypeQualifier(type)) {
-         qualifiers[static_cast<int>(type) - static_cast<int>(TK::CONST)] = true;
-         continue;
-      }
-
-      if (ty) {
-         diagnostics_ << "Type already set";
-         break;
-      }
-
-      if (type == TK::BITINT) {
-         assert(false && "Not implemented"); // todo: (jr) not implemented
-      }
-
-      if (type >= TK::CHAR && type <= TK::DECIMAL128) {
-         tycount[type]++;
-         continue;
-      }
-
-      switch (type) {
-         case TK::STRUCT:
-         case TK::UNION:
-            parseOptAttributeSpecifierSequence();
-            ident = *pos_;
-            ++pos_;
-            switch (pos_->getType()) {
-               case TK::L_BRACE:
-                  do {
-                     parseMemberDeclaration();
-                  } while (pos_->getType() != TK::R_BRACE);
-                  break;
-               case TK::SEMICOLON:
-                  // end of declaration
-                  break;
-               default:
-                  diagnostics_ << "Expected '{' or ';'. Probably missing a semicolon.";
-            }
-            break;
-         case TK::ENUM:
-         case TK::TYPEDEF:
-         case TK::TYPEOF:
-         case TK::ATOMIC:
-         case TK::ALIGNAS:
-            assert(false && "Not implemented"); // todo: (jr) not implemented
-            break;
-         case TK::VOID:
-            ty = TY(TYK::VOID);
-            break;
-         default:
-            assert(false && "unexpected token");
-            break;
-      }
-   }
-
-   if (!ty) {
-      // float | DECIMAL[32|64|128] | COMPLEX | BOOL
-      if (tycount.consume(TK::FLOAT)) {
-         ty = TY(TYK::FLOAT);
-      } else if (tycount.consume(TK::DECIMAL32)) {
-         ty = TY(TYK::DECIMAL32);
-      } else if (tycount.consume(TK::DECIMAL64)) {
-         ty = TY(TYK::DECIMAL64);
-      } else if (tycount.consume(TK::DECIMAL128)) {
-         ty = TY(TYK::DECIMAL128);
-      } else if (tycount[TK::COMPLEX]) {
-         assert(false && "Not implemented"); // todo: (jr) not implemented
-      } else if (tycount.consume(TK::BOOL)) {
-         ty = TY(TYK::BOOL);
-      } else {
-         // [signed | unsigned] char
-         // [signed | unsigned] short [int]
-         // [signed | unsigned] int | signed | unsigned
-         // [signed | unsigned] long [int]
-         // [signed | unsigned] long long [int]
-         // long double
-         // double
-
-         bool unsigned_ = tycount.consume(TK::UNSIGNED);
-         bool signed_ = tycount.consume(TK::SIGNED);
-         bool int_ = tycount.consume(TK::INT);
-
-         int longs = std::min(2, static_cast<int>(tycount[TK::LONG]));
-
-         if (unsigned_ && signed_) {
-            diagnostics_ << "specifier singed and unsigned used together\n";
-         }
-
-         if (tycount.consume(TK::CHAR)) {
-            // int token cannot be used with char
-            tycount[TK::INT] += int_;
-            ty = TY(TYK::CHAR, unsigned_);
-         } else if (tycount.consume(TK::SHORT)) {
-            ty = TY(TYK::SHORT, unsigned_);
-         } else if (tycount[TK::DOUBLE] >= 1) {
-            --tycount[TK::DOUBLE];
-            if (longs == 1) {
-               --tycount[TK::LONG];
-               ty = TY(TYK::LONGDOUBLE);
-            } else {
-               ty = TY(TYK::DOUBLE);
-            }
-         } else if (longs == 1) {
-            tycount[TK::LONG] -= longs;
-            ty = TY(TYK::LONG, unsigned_);
-         } else if (longs == 2) {
-            tycount[TK::LONG] -= longs;
-            ty = TY(TYK::LONGLONG, unsigned_);
-         } else {
-            // must be int
-            ty = TY(TYK::INT, unsigned_);
-         }
-      }
-   }
-
-   ty.qualifiers.CONST = qualifiers[0];
-   ty.qualifiers.RESTRICT = qualifiers[1];
-   ty.qualifiers.VOLATILE = qualifiers[2];
-
-   for (int i = 0; i < static_cast<int>(tycount.size()); ++i) {
-      if (tycount[tycount.tokenAt(i)]) {
-         diagnostics_ << "unexpected token";
-         std::cerr << "specifier " << tycount.tokenAt(i) << " used " << static_cast<int>(tycount[tycount.tokenAt(i)]) << " times with " << ty << '\n';
-         // assert(false && "unexpected token");
-      }
-   }
-   tracer_ << EXIT{"parseDeclarationSpecifierList"};
-   return ty;
-}
-template <typename _DiagnosticTracker>
-void Parser<_DiagnosticTracker>::parseOptAttributeSpecifierSequence() {
-   // todo: (jr) not implemented
-}
-// ---------------------------------------------------------------------------
-template <typename _DiagnosticTracker>
-Parser<_DiagnosticTracker>::TY Parser<_DiagnosticTracker>::parseTypeName() {
-   tracer_ << ENTER{"parseTypeName"};
-   Token t = *pos_;
-   // parse specifier-qualifier-list
-   TY ty = parseSpecifierQualifierList();
-
-   if (isAbstractDeclaratorStart(pos_->getType())) {
-      // todo: attribute-specifier-sequence (opt)
-      auto [declTy, base] = parseDeclarator();
-      *base = ty;
-      ty = declTy;
-   }
-
-   // todo: check that declator is abstract
-
-   tracer_ << "type-name: " << ty << '\n';
-   tracer_ << EXIT{"parseTypeName"};
-   return ty;
-}
-// ---------------------------------------------------------------------------
-template <typename _DiagnosticTracker>
 Parser<_DiagnosticTracker>::ssa Parser<_DiagnosticTracker>::parsePrimaryExpr() {
    tracer_ << ENTER{"parsePrimaryExpr"};
+   tracer_ << "current token: " << *pos_ << std::endl;
    ssa expr;
    op::Kind kind;
    Token t = *pos_;
 
-   switch (t.getType()) {
+   switch (t.getKind()) {
       case TK::ICONST:
       case TK::U_ICONST:
       case TK::L_ICONST:
@@ -628,6 +446,7 @@ Parser<_DiagnosticTracker>::ssa Parser<_DiagnosticTracker>::parsePrimaryExpr() {
       case TK::DCONST:
       case TK::LDCONST:
          expr = std::make_unique<Expr>(t);
+         // todo:expr->isConstExpr = true;
          ++pos_;
          break;
       case TK::IDENT:
@@ -642,13 +461,13 @@ Parser<_DiagnosticTracker>::ssa Parser<_DiagnosticTracker>::parsePrimaryExpr() {
       // todo: (jr) type cast
       case TK::L_BRACE:
          ++pos_;
-         if (isTypeSpecifierQualifier(pos_->getType())) {
+         if (isTypeSpecifierQualifier(pos_->getKind())) {
             TY ty = parseTypeName();
             expect(TK::R_BRACE);
-            expr = std::make_unique<Expr>(op::Kind::CAST, ty, parsePrimaryExpr());
+            expr = std::make_unique<Expr>(op::Kind::CAST, ty, parseExpr(2));
          } else {
             expr = parseExpr();
-            expr->opspec.precedence = 0;
+            expr->setPrec(0);
             expect(TK::R_BRACE);
          }
          break;
@@ -684,7 +503,7 @@ Parser<_DiagnosticTracker>::ssa Parser<_DiagnosticTracker>::parsePrimaryExpr() {
       // todo: (jr) generic selection
       default:
          // unary prefix operator
-         switch (t.getType()) {
+         switch (t.getKind()) {
             case TK::INC:
                kind = op::Kind::PREINC;
                break;
@@ -713,16 +532,360 @@ Parser<_DiagnosticTracker>::ssa Parser<_DiagnosticTracker>::parsePrimaryExpr() {
             case TK::ALIGNOF:
                assert(false && "Not implemented"); // todo: (jr) not implemented
             default:
-               diagnostics_.report("expected primary expression");
+               diagnostics_ << "Unexpected token for primary expression: " << t.getKind() << std::endl;
                tracer_ << EXIT{"parsePrimaryExpr"};
-               assert(false && "unexpected token"); // todo: (jr) unexpected token
                return expr;
          }
          ++pos_;
-         expr = std::make_unique<Expr>(kind, 2, false, parsePrimaryExpr());
+         expr = std::make_unique<Expr>(kind, 2, false, parseExpr(2));
    }
    tracer_ << EXIT{"parsePrimaryExpr"};
    return expr;
+}
+// ---------------------------------------------------------------------------
+template <typename _DiagnosticTracker>
+std::pair<typename Parser<_DiagnosticTracker>::TY, typename Parser<_DiagnosticTracker>::DeclTypeBaseRef> Parser<_DiagnosticTracker>::parseDeclarator() {
+   tracer_ << ENTER{"parseDeclarator"};
+   Token ident;
+   TY ptrTy;
+   DeclTypeBaseRef base;
+
+   while (consumeAnyOf(TK::ASTERISK)) {
+      parseOptAttributeSpecifierSequence();
+      // todo: (jr) type-qualifier-list
+      TY ty = TY::ptrTo({});
+      for (; isTypeQualifier(pos_->getKind()); ++pos_) {
+         ty.addQualifier(pos_->getKind());
+      }
+      base.chain(ty);
+      if (!ptrTy) {
+         ptrTy = ty;
+      }
+   }
+
+   DeclTypeBaseRef mid;
+   TY ty;
+
+   // direct-declarator
+   ident = consumeAnyOf(TK::IDENT);
+   if (!ident && pos_->getKind() == TK::L_BRACE) {
+      TK next{pos_.peek()};
+
+      // todo: (jr) non abstract declarator start
+      if (isAbstractDeclaratorStart(next)) {
+         // abstract-declarator
+         expect(TK::L_BRACE);
+
+         auto [innerTy, innerBase] = parseDeclarator();
+         ty = innerTy;
+         mid = innerBase;
+
+         expect(TK::R_BRACE);
+      } else {
+         // function-declarator, handled below
+      }
+   }
+   parseOptAttributeSpecifierSequence();
+
+   while (Token t = consumeAnyOf(TK::L_BRACKET, TK::L_BRACE)) {
+      TK kind = t.getKind();
+      if (kind == TK::L_BRACKET) {
+         bool static_ = false;
+         bool unspecSize = true;
+         bool varLen = false;
+         std::size_t size = 0;
+
+         // array-declarator
+         static_ = parseOpt(TK::STATIC);
+
+         // todo: (jr) type-qualifier-list
+         static_ |= parseOpt(TK::STATIC);
+
+         if (parseOpt(TK::ASTERISK)) {
+            unspecSize = true;
+            varLen = true;
+            if (static_) {
+               diagnostics_ << "static and * used together" << std::endl;
+            }
+         } else {
+            // todo: assignment-expression opt
+            // todo: static requires assignment-expression
+            if (pos_->getKind() != TK::R_BRACKET) {
+               auto expr = parseExpr(14);
+               // todo: assert(expr->ty == TY{TYK::INT} && "array size must be integer");
+               size = 0; // todo: expr->token.template getValue<int>();
+               unspecSize = false;
+            }
+         }
+
+         // todo: unspecSize, varLen
+         // todo: static
+         TY arrTy{TY::arrayOf({}, size, varLen, unspecSize)};
+         mid.chain(arrTy);
+         if (!ty) {
+            ty = arrTy;
+         }
+
+         expect(TK::R_BRACKET);
+      } else {
+         // function-declarator
+         // todo: parameter-type-listopt
+
+         auto params = parseParameterList();
+         bool varargs = false;
+
+         if (params.size() == 0 && consumeAnyOf(TK::ELLIPSIS)) {
+            varargs = true;
+         } else if (consumeAnyOf(TK::COMMA)) {
+            expect(TK::ELLIPSIS);
+            varargs = true;
+         }
+
+         TY fnTy{TY::function({}, params, varargs)};
+         mid.chain(fnTy);
+         if (!ty) {
+            ty = fnTy;
+         }
+         expect(TK::R_BRACE);
+      }
+      parseOptAttributeSpecifierSequence();
+   }
+
+   tracer_ << "merging types\n";
+   // todo: this seems scuffed
+   if (!ty) {
+      ty = ptrTy;
+   } else if (mid) {
+      *mid = ptrTy;
+   }
+
+   if (!base) {
+      if (mid) {
+         base = mid;
+      } else {
+         base = DeclTypeBaseRef(ty);
+      }
+   }
+   tracer_ << EXIT{"parseDeclarator"};
+   return {ty, base};
+}
+// ---------------------------------------------------------------------------
+template <typename _DiagnosticTracker>
+void Parser<_DiagnosticTracker>::parseMemberDeclaratorList() {
+   parseOptAttributeSpecifierSequence();
+   parseSpecifierQualifierList();
+   do {
+      // todo: (jr) declarator
+      // todo: (jr) bitfield
+   } while (pos_->getKind() == TK::COLON);
+}
+// ---------------------------------------------------------------------------
+template <typename _DiagnosticTracker>
+Parser<_DiagnosticTracker>::TY Parser<_DiagnosticTracker>::parseDeclarationSpecifierList(bool storageClassSpecifiers, bool functionSpecifiers) {
+   // todo: (jr) storageClassSpecifiers and functionSpecifiers not implemented
+   (void) storageClassSpecifiers;
+   (void) functionSpecifiers;
+
+   tracer_ << ENTER{"parseDeclarationSpecifierList"};
+   TY ty;
+   Token ident;
+
+   TokenCounter<TK::CHAR, TK::DECIMAL128> tycount{};
+   bool qualifiers[3] = {false, false, false};
+
+   for (Token t = *pos_; t.getKind() >= TK::VOID && t.getKind() <= TK::ALIGNAS; t = *++pos_) {
+      TK type = t.getKind();
+
+      if (isTypeQualifier(type)) {
+         qualifiers[static_cast<int>(type) - static_cast<int>(TK::CONST)] = true;
+         continue;
+      }
+
+      if (ty) {
+         diagnostics_ << "Type already set" << std::endl;
+         break;
+      }
+
+      if (type == TK::BITINT) {
+         assert(false && "Not implemented"); // todo: (jr) not implemented
+      }
+
+      if (type >= TK::CHAR && type <= TK::DECIMAL128) {
+         tycount[type]++;
+         continue;
+      }
+      std::vector<TY> members;
+      switch (type) {
+         case TK::STRUCT:
+         case TK::UNION:
+            ++pos_;
+            parseOptAttributeSpecifierSequence();
+            ident = consumeAnyOf(TK::IDENT);
+            tracer_ << "struct/union: " << ident << std::endl;
+            tracer_ << "current token: " << *pos_ << std::endl;
+            if (consumeAnyOf(TK::L_C_BRKT)) {
+               // struct-declaration-list
+               tracer_ << "struct-declaration-list" << std::endl;
+               do {
+                  // todo: static-assert-declaration
+                  parseOptAttributeSpecifierSequence();
+                  TY memberTy = parseSpecifierQualifierList();
+                  // member-declarator-listop
+                  // parseMemberDeclaratorList();
+                  members.push_back(memberTy);
+                  expect(TK::SEMICOLON);
+               } while (pos_->getKind() != TK::R_C_BRKT && pos_->getKind() != TK::END);
+            } else if (!ident) {
+               diagnostics_ << "Expected identifier or member declaration but got " << *pos_ << std::endl;
+            }
+            // todo: incomplete struct or union
+            ty = TY::structOrUnion(type, members, false);
+            tracer_ << "token after struct/union: " << *pos_ << std::endl;
+            break;
+         case TK::ENUM:
+         case TK::TYPEDEF:
+         case TK::TYPEOF:
+         case TK::ATOMIC:
+         case TK::ALIGNAS:
+            assert(false && "Not implemented"); // todo: (jr) not implemented
+            break;
+         case TK::VOID:
+            ty = TY(TYK::VOID);
+            break;
+         default:
+            diagnostics_ << "Unexpected token: " << type << std::endl;
+            break;
+      }
+   }
+
+   if (!ty) {
+      // float | DECIMAL[32|64|128] | COMPLEX | BOOL
+      if (tycount.consume(TK::FLOAT)) {
+         ty = TY(TYK::FLOAT);
+      } else if (tycount.consume(TK::DECIMAL32)) {
+         ty = TY(TYK::DECIMAL32);
+      } else if (tycount.consume(TK::DECIMAL64)) {
+         ty = TY(TYK::DECIMAL64);
+      } else if (tycount.consume(TK::DECIMAL128)) {
+         ty = TY(TYK::DECIMAL128);
+      } else if (tycount[TK::COMPLEX]) {
+         assert(false && "Not implemented"); // todo: (jr) not implemented
+      } else if (tycount.consume(TK::BOOL)) {
+         ty = TY(TYK::BOOL);
+      } else {
+         // [signed | unsigned] char
+         // [signed | unsigned] short [int]
+         // [signed | unsigned] int | signed | unsigned
+         // [signed | unsigned] long [int]
+         // [signed | unsigned] long long [int]
+         // long double
+         // double
+
+         bool unsigned_ = tycount.consume(TK::UNSIGNED);
+         bool signed_ = tycount.consume(TK::SIGNED);
+         bool int_ = tycount.consume(TK::INT);
+
+         int longs = std::min(2, static_cast<int>(tycount[TK::LONG]));
+
+         if (unsigned_ && signed_) {
+            diagnostics_ << "specifier singed and unsigned used together" << std::endl;
+         }
+
+         if (tycount.consume(TK::CHAR)) {
+            // int token cannot be used with char
+            tycount[TK::INT] += int_;
+            ty = TY(TYK::CHAR, unsigned_);
+         } else if (tycount.consume(TK::SHORT)) {
+            ty = TY(TYK::SHORT, unsigned_);
+         } else if (tycount[TK::DOUBLE] >= 1) {
+            --tycount[TK::DOUBLE];
+            if (longs == 1) {
+               --tycount[TK::LONG];
+               ty = TY(TYK::LONGDOUBLE);
+            } else {
+               ty = TY(TYK::DOUBLE);
+            }
+         } else if (longs == 1) {
+            tycount[TK::LONG] -= longs;
+            ty = TY(TYK::LONG, unsigned_);
+         } else if (longs == 2) {
+            tycount[TK::LONG] -= longs;
+            ty = TY(TYK::LONGLONG, unsigned_);
+         } else {
+            // must be int
+            ty = TY(TYK::INT, unsigned_);
+         }
+      }
+   }
+
+   ty.qualifiers.CONST = qualifiers[0];
+   ty.qualifiers.RESTRICT = qualifiers[1];
+   ty.qualifiers.VOLATILE = qualifiers[2];
+
+   for (int i = 0; i < static_cast<int>(tycount.size()); ++i) {
+      if (tycount[tycount.tokenAt(i)]) {
+         diagnostics_ << "specifier " << tycount.tokenAt(i) << " used " << static_cast<int>(tycount[tycount.tokenAt(i)]) << " times with " << ty << std::endl;
+      }
+   }
+
+   // todo: parseOptAttributeSpecifierSequence();
+
+   tracer_ << EXIT{"parseDeclarationSpecifierList"};
+   return ty;
+}
+// ---------------------------------------------------------------------------
+template <typename _DiagnosticTracker>
+Parser<_DiagnosticTracker>::TY Parser<_DiagnosticTracker>::parseSpecifierQualifierList() {
+   return parseDeclarationSpecifierList(false, false);
+}
+// ---------------------------------------------------------------------------
+template <typename _DiagnosticTracker>
+std::vector<typename Parser<_DiagnosticTracker>::attr_t> Parser<_DiagnosticTracker>::parseOptAttributeSpecifierSequence() {
+   // todo: (jr) not implemented
+   std::vector<Token> attrs{};
+   while (pos_->getKind() == TK::L_BRACKET && pos_.peek() == TK::L_BRACKET) {
+      ++pos_;
+      ++pos_;
+      unsigned attrCount = 0;
+      // attribute-list
+      while (!consumeAnyOf(TK::R_BRACKET)) {
+         // attribute
+         if (attrCount) {
+            expect(TK::COMMA);
+         }
+
+         Token t = expect(TK::IDENT);
+         attrs.push_back(t);
+         ++attrCount;
+
+         // todo: attribute-prefixed-token
+         // todo: attribute-argument-clause(opt)
+      }
+      expect(TK::R_BRACKET);
+   }
+   return attrs;
+}
+// ---------------------------------------------------------------------------
+template <typename _DiagnosticTracker>
+Parser<_DiagnosticTracker>::TY Parser<_DiagnosticTracker>::parseTypeName() {
+   tracer_ << ENTER{"parseTypeName"};
+   Token t = *pos_;
+   // parse specifier-qualifier-list
+   TY ty = parseSpecifierQualifierList();
+
+   if (isAbstractDeclaratorStart(pos_->getKind())) {
+      // todo: attribute-specifier-sequence (opt)
+      auto [declTy, base] = parseDeclarator();
+      tracer_ << "abstract-declarator for type name: " << declTy << std::endl;
+      *base = ty;
+      ty = declTy;
+   }
+
+   // todo: check that declator is abstract
+
+   tracer_ << "type-name: " << ty << std::endl;
+   tracer_ << EXIT{"parseTypeName"};
+   return ty;
 }
 // ---------------------------------------------------------------------------
 } // namespace qcp
