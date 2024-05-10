@@ -6,6 +6,7 @@
 #include "token.h"
 // ---------------------------------------------------------------------------
 #include <cassert>
+// Alexis hates iostream
 #include <iostream>
 // ---------------------------------------------------------------------------
 namespace qcp {
@@ -26,6 +27,9 @@ enum class Kind {
    BW_OR,
    L_AND,
    L_OR,
+
+   // these types may not be handled by the emitter
+   // todo: ask alexis how to better structure this
    COND,
    ASSIGN, ADD_ASSIGN, SUB_ASSIGN, MUL_ASSIGN, DIV_ASSIGN, REM_ASSIGN, SHL_ASSIGN, SHR_ASSIGN, BW_AND_ASSIGN, BW_XOR_ASSIGN, BW_OR_ASSIGN,
    COMMA,
