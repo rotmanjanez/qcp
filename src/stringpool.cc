@@ -5,7 +5,11 @@
 // ---------------------------------------------------------------------------
 namespace qcp {
 // ---------------------------------------------------------------------------
-std::vector<std::string_view> StringPool::strings_{};
+std::vector<std::string_view> StringPool::strings_(1);
+// ---------------------------------------------------------------------------
+unsigned StringPool::insert(const char* str) {
+   return insert(std::string_view{str});
+}
 // ---------------------------------------------------------------------------
 unsigned StringPool::insert(std::string_view str) {
    auto it = std::find(strings_.begin(), strings_.end(), str);
@@ -22,6 +26,10 @@ Ident::operator std::string_view() const {
 // ---------------------------------------------------------------------------
 Ident::operator std::string() const {
    return std::string(StringPool::get(tag));
+}
+// ---------------------------------------------------------------------------
+Ident::operator bool() const {
+   return tag != 0;
 }
 // ---------------------------------------------------------------------------
 std::string_view StringPool::get(unsigned idx) {
