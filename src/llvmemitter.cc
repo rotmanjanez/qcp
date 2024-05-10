@@ -1,0 +1,100 @@
+// ---------------------------------------------------------------------------
+// qcp
+// ---------------------------------------------------------------------------
+#include "llvmemitter.h"
+#include "operator.h"
+#include "type.h"
+// ---------------------------------------------------------------------------
+namespace {
+// ---------------------------------------------------------------------------
+using OpKind = qcp::op::Kind;
+using Instr = llvm::Instruction;
+// ---------------------------------------------------------------------------
+Instr::BinaryOps toLLVMBinOp(OpKind kind) {
+   switch (kind) {
+      case OpKind::ADD: return Instr::Add;
+      case OpKind::SUB: return Instr::Sub;
+      case OpKind::MUL: return Instr::Mul;
+      case OpKind::DIV: return Instr::SDiv;
+      case OpKind::REM: return Instr::SRem;
+      case OpKind::L_AND: return Instr::And;
+      case OpKind::L_OR: return Instr::Or;
+      case OpKind::BW_XOR: return Instr::Xor;
+      case OpKind::SHL: return Instr::Shl;
+      case OpKind::SHR: return Instr::AShr;
+      default: return llvm::Instruction::BinaryOps::BinaryOpsEnd;
+   }
+}
+// ---------------------------------------------------------------------------
+Instr::UnaryOps toLLVMUnOp(OpKind kind) {
+   switch (kind) {
+         // case OpKind::BW_NOT:
+      default: return llvm::Instruction::UnaryOps::UnaryOpsEnd;
+   }
+}
+// ---------------------------------------------------------------------------
+Instr::OtherOps toLLVMOtherOp(OpKind kind) {
+   switch (kind) {
+      case OpKind::EQ: return Instr::ICmp;
+      case OpKind::NE: return Instr::ICmp;
+      case OpKind::LT: return Instr::ICmp;
+      case OpKind::LE: return Instr::ICmp;
+      case OpKind::GT: return Instr::ICmp;
+      case OpKind::GE: return Instr::ICmp;
+      default: return llvm::Instruction::OtherOps::OtherOpsEnd;
+   }
+}
+// ---------------------------------------------------------------------------
+} // namespace
+// ---------------------------------------------------------------------------
+namespace qcp {
+namespace emitter {
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ty_t* LLVMEmitter::emitPtrTo(ty_t* ty) {
+   return ty->getPointerTo();
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ty_t* LLVMEmitter::emitIntTy(unsigned bits) {
+   return llvm::IntegerType::get(Ctx, bits);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ty_t* LLVMEmitter::emitFnTy(ty_t* retTy, std::vector<ty_t*> argTys) {
+   return llvm::FunctionType::get(retTy, argTys, false);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::fn_t* LLVMEmitter::emitFnProto(Ident name, ty_t* fnTy) {
+   return llvm::Function::Create(static_cast<llvm::FunctionType*>(fnTy), llvm::Function::ExternalLinkage, static_cast<std::string>(name).c_str(), Mod);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::bb_t* LLVMEmitter::emitFn(fn_t* fnProto) {
+   return llvm::BasicBlock::Create(Ctx, "entry", fnProto);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::bb_t* LLVMEmitter::emitBB(Ident name, fn_t* fn) {
+   return llvm::BasicBlock::Create(Ctx, static_cast<std::string>(name).c_str(), fn);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitConst(bb_t* bb, ty_t* ty, Ident name, long value) {
+   return llvm::ConstantInt::get(ty, value);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::phi_t* LLVMEmitter::emitPhi(bb_t* bb, Ident name, ty_t* ty) {
+   return llvm::PHINode::Create(ty, 0, static_cast<std::string>(name).c_str(), bb);
+}
+// ---------------------------------------------------------------------------
+void LLVMEmitter::addIncoming(Ident name, phi_t* phi, ssa_t* value, bb_t* bb) {}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitBinOp(bb_t* bb, Ident name, op::Kind kind, ssa_t* lhs, ssa_t* rhs) {
+   if (auto binOp = toLLVMBinOp(kind); binOp != Instr::BinaryOps::BinaryOpsEnd) {
+      return llvm::BinaryOperator::Create(binOp, lhs, rhs, static_cast<std::string>(name).c_str(), bb);
+   }
+   // else if (auto otherOp = toLLVMOtherOp(kind); otherOp != Instr::OtherOps::OtherOpsEnd) {
+   //   return llvm::CmpInst::Create(otherOp, llvm::CmpInst::Predicate::ICMP_EQ, lhs, rhs, static_cast<std::string>(name).c_str(), bb);
+   // }
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitUnOp(bb_t* bb, Ident name, op::Kind kind, ssa_t* operand) { return nullptr; }
+// ---------------------------------------------------------------------------
+} // namespace emitter
+} // namespace qcp
+// ---------------------------------------------------------------------------
