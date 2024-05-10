@@ -1,7 +1,9 @@
+// Alexis hates iostream
 #include <iostream>
 #include <string>
 #include <string_view>
 // ---------------------------------------------------------------------------
+#include "llvmemitter.h"
 #include "parser.h"
 #include "tokenizer.h"
 // ---------------------------------------------------------------------------
@@ -34,12 +36,12 @@ int main(int argc, char* argv[]) {
    }
 
    qcp::DiagnosticTracker diag{code};
-   qcp::Tokenizer<qcp::DiagnosticTracker> ts{code, diag};
+   qcp::Tokenizer ts{code, diag};
    for (const auto& token : ts) {
       std::cout << token << '\n';
    }
 
-   qcp::Parser<qcp::DiagnosticTracker> parser{code, diag};
+   qcp::Parser<qcp::emitter::LLVMEmitter> parser{code, diag};
 
    parser.parse();
 
