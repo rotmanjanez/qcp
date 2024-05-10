@@ -19,15 +19,12 @@ namespace qcp {
 // ---------------------------------------------------------------------------
 using sv_it = std::string_view::const_iterator;
 // ---------------------------------------------------------------------------
-class DiagnosticTracker;
-// ---------------------------------------------------------------------------
-template <typename _DiagnosticTracker = DiagnosticTracker>
 class Tokenizer {
    using TK = token::Kind;
    using Token = token::Token;
 
    public:
-   explicit Tokenizer(const std::string_view prog, _DiagnosticTracker& diagnistics) : prog_{prog}, diagnostics_{diagnistics} {}
+   explicit Tokenizer(const std::string_view prog, DiagnosticTracker& diagnistics) : prog_{prog}, diagnostics_{diagnistics} {}
 
    explicit Tokenizer(const Tokenizer&) = delete;
    Tokenizer& operator=(const Tokenizer&) = delete;
@@ -43,7 +40,7 @@ class Tokenizer {
       private:
       public:
       explicit const_iterator() : token_{TK::END}, prog_{}, diagnostics_{nullptr} {}
-      explicit const_iterator(const std::string_view prog_, _DiagnosticTracker& diagnistics) : token_{TK::UNKNOWN}, prog_{prog_}, diagnostics_{&diagnistics} {
+      explicit const_iterator(const std::string_view prog_, DiagnosticTracker& diagnistics) : token_{TK::UNKNOWN}, prog_{prog_}, diagnostics_{&diagnistics} {
          ++(*this);
       }
 
@@ -105,7 +102,7 @@ class Tokenizer {
 
    private:
    const std::string_view prog_;
-   _DiagnosticTracker& diagnostics_;
+   DiagnosticTracker& diagnostics_;
 };
 // ---------------------------------------------------------------------------
 // Implementation
@@ -202,8 +199,8 @@ T safe_cast(U value) {
    return static_cast<T>(value);
 }
 // ---------------------------------------------------------------------------
-template <typename _NumberPredicate, typename _DiagnosticTracker>
-sv_it findEndOfINumber(sv_it begin, sv_it end, _NumberPredicate _p, _DiagnosticTracker& diagnostics) {
+template <typename _NumberPredicate>
+sv_it findEndOfINumber(sv_it begin, sv_it end, _NumberPredicate _p, DiagnosticTracker& diagnostics) {
    auto& numberEnd{begin};
    char prev;
    do {
@@ -222,8 +219,8 @@ sv_it findEndOfINumber(sv_it begin, sv_it end, _NumberPredicate _p, _DiagnosticT
    return numberEnd;
 }
 // ---------------------------------------------------------------------------
-template <const char lowercaseExponentChar, const char uppercaseExponentChar, typename _DiagnosticTracker>
-sv_it findEndOfExponent(sv_it begin, sv_it end, _DiagnosticTracker& diagnostics) {
+template <const char lowercaseExponentChar, const char uppercaseExponentChar>
+sv_it findEndOfExponent(sv_it begin, sv_it end, DiagnosticTracker& diagnostics) {
    auto& expEnd{begin};
 
    if (expEnd != end && (*expEnd == lowercaseExponentChar or *expEnd == uppercaseExponentChar)) {
@@ -236,8 +233,8 @@ sv_it findEndOfExponent(sv_it begin, sv_it end, _DiagnosticTracker& diagnostics)
    return expEnd;
 }
 // ---------------------------------------------------------------------------
-template <const char quoteChar, typename _DiagnosticTracker>
-sv_it getCharSequence(sv_it begin, sv_it end, _DiagnosticTracker& diagnostics) {
+template <const char quoteChar>
+sv_it getCharSequence(sv_it begin, sv_it end, DiagnosticTracker& diagnostics) {
    sv_it cSeqEnd{begin + 1};
    while (cSeqEnd != end) {
       cSeqEnd = std::find_if(cSeqEnd, end, [](const char c) { return c == '\\' || c == '"' || c == '\n'; });
@@ -297,8 +294,7 @@ sv_it getCharSequence(sv_it begin, sv_it end, _DiagnosticTracker& diagnostics) {
    return cSeqEnd;
 }
 // ---------------------------------------------------------------------------
-template <typename _DiagnosticTracker>
-sv_it Tokenizer<_DiagnosticTracker>::const_iterator::getNumberConst(sv_it begin) {
+sv_it Tokenizer::const_iterator::getNumberConst(sv_it begin) {
    sv_it valueEnd{begin};
    sv_it suffixEnd;
    int base;
@@ -463,8 +459,7 @@ sv_it Tokenizer<_DiagnosticTracker>::const_iterator::getNumberConst(sv_it begin)
    return suffixEnd;
 }
 // ---------------------------------------------------------------------------
-template <typename _DiagnosticTracker>
-sv_it Tokenizer<_DiagnosticTracker>::const_iterator::getPunctuator(sv_it begin) {
+sv_it Tokenizer::const_iterator::getPunctuator(sv_it begin) {
    TK type;
    unsigned len = 1;
    std::array<char, 3> chars = {0, 0, 0};
@@ -709,22 +704,19 @@ sv_it Tokenizer<_DiagnosticTracker>::const_iterator::getPunctuator(sv_it begin) 
    return begin + len;
 }
 // ---------------------------------------------------------------------------
-template <typename _DiagnosticTracker>
-sv_it Tokenizer<_DiagnosticTracker>::const_iterator::getSCharSequence(sv_it begin) {
+sv_it Tokenizer::const_iterator::getSCharSequence(sv_it begin) {
    sv_it cSeqEnd = getCharSequence<'"'>(begin, prog_.end(), *diagnostics_);
    token_ = Token{std::string_view{begin + 1, cSeqEnd - 1}, TK::SLITERAL};
    return cSeqEnd;
 }
 // ---------------------------------------------------------------------------
-template <typename _DiagnosticTracker>
-sv_it Tokenizer<_DiagnosticTracker>::const_iterator::getCCharSequence(sv_it begin) {
+sv_it Tokenizer::const_iterator::getCCharSequence(sv_it begin) {
    sv_it cSeqEnd = getCharSequence<'\''>(begin, prog_.end(), *diagnostics_);
    token_ = Token{std::string_view{begin + 1, cSeqEnd - 1}, TK::CLITERAL};
    return cSeqEnd;
 }
 // ---------------------------------------------------------------------------
-template <typename _DiagnosticTracker>
-Tokenizer<_DiagnosticTracker>::const_iterator& Tokenizer<_DiagnosticTracker>::const_iterator::operator++() {
+Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
    if (prog_.empty()) {
       token_ = Token{TK::END};
       return *this;
@@ -784,8 +776,7 @@ Tokenizer<_DiagnosticTracker>::const_iterator& Tokenizer<_DiagnosticTracker>::co
    return *this;
 }
 // ---------------------------------------------------------------------------
-template <typename _DiagnosticTracker>
-Tokenizer<_DiagnosticTracker>::const_iterator Tokenizer<_DiagnosticTracker>::const_iterator::operator++(int) {
+Tokenizer::const_iterator Tokenizer::const_iterator::operator++(int) {
    const_iterator tmp = *this;
    ++(*this);
    return tmp;
