@@ -17,6 +17,18 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
 set(SCMAKE_CXX_COMPILER "g++")
 
 # ---------------------------------------------------------------------------
+# Packages
+# ---------------------------------------------------------------------------
+
+# LLVM
+find_package(LLVM REQUIRED CONFIG)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${LLVM_CMAKE_DIR}")
+include(AddLLVM)
+include_directories(${LLVM_INCLUDE_DIRS})
+add_definitions(${LLVM_DEFINITIONS})
+llvm_map_components_to_libnames(llvm core)
+
+# ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
 include("${CMAKE_SOURCE_DIR}/clang-tidy.cmake")
@@ -46,14 +58,20 @@ set(INCLUDE_H
     "${CMAKE_SOURCE_DIR}/include/parser.h"
     "${CMAKE_SOURCE_DIR}/include/operator.h"
     "${CMAKE_SOURCE_DIR}/include/loc.h"
+    "${CMAKE_SOURCE_DIR}/include/scope.h"
     "${CMAKE_SOURCE_DIR}/include/type.h"
     "${CMAKE_SOURCE_DIR}/include/tracer.h"
+    "${CMAKE_SOURCE_DIR}/include/stringpool.h"
+    "${CMAKE_SOURCE_DIR}/include/expr.h"
+    "${CMAKE_SOURCE_DIR}/include/llvmemitter.h"
 )
 
 set(SRC_CC
     "${CMAKE_SOURCE_DIR}/src/token.cc"
     "${CMAKE_SOURCE_DIR}/src/operator.cc"
     "${CMAKE_SOURCE_DIR}/src/diagnostics.cc"
+    "${CMAKE_SOURCE_DIR}/src/stringpool.cc"
+    "${CMAKE_SOURCE_DIR}/src/llvmemitter.cc"
 )
 
 set(TOOLS_H
@@ -74,6 +92,7 @@ set(BENCH_CC
 # Targets
 # ---------------------------------------------------------------------------
 add_library(libqcp STATIC ${SRC_CC})
+target_link_libraries(libqcp ${llvm})
 
 add_executable(qcp src/main.cc)
 target_link_libraries(qcp libqcp)
