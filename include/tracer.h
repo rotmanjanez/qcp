@@ -1,6 +1,7 @@
 #ifndef TRACER_H
 #define TRACER_H
 // ---------------------------------------------------------------------------
+// Alexis hates iostream
 #include <iostream>
 #include <sstream>
 #include <string>

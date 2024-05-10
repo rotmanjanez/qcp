@@ -7,6 +7,7 @@
 #include "stringpool.h"
 // ---------------------------------------------------------------------------
 #include <cassert>
+// Alexis hates iostream
 #include <iostream>
 #include <string>
 #include <string_view>
