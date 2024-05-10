@@ -11,10 +11,10 @@
 namespace qcp {
 namespace type {
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
+template <typename _EmitterT>
 struct Base;
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
+template <typename _EmitterT>
 class BaseFactory;
 // ---------------------------------------------------------------------------
 enum class Kind {
@@ -33,27 +33,37 @@ enum class Kind {
    // clang-format on
 };
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
+template <typename _EmitterT>
 class Type {
-   using Base = Base<_IRValueRef>;
-   using Factory = BaseFactory<_IRValueRef>;
+   using Base = Base<_EmitterT>;
+   using Factory = BaseFactory<_EmitterT>;
    using Token = token::Token;
 
    template <typename T>
    friend std::ostream& operator<<(std::ostream& os, const Type<T>& ty);
 
-   explicit Type(unsigned short typeIndex) : typeIndex_{typeIndex} {}
+   friend Factory;
+
+   template <std::integral T>
+   explicit Type(T typeIndex) : typeIndex_{static_cast<unsigned short>(typeIndex)} {
+      // todo: assert(static_cast<std::size_t>(typeIndex) < Factory::getTypes().size() && "Invalid typeIndex");
+   }
 
    public:
    Type() : typeIndex_{0} {}
 
+   Type(const Type& other) = default;
+   Type(Type&& other) = default;
+   Type& operator=(const Type& other) = default;
+   Type& operator=(Type&& other) = default;
+
    explicit Type(Kind kind) : typeIndex_{Factory::construct(kind)} {}
+
+   Type(Kind integerKind, bool unsignedTy) : typeIndex_{Factory::construct(integerKind, unsignedTy)} {}
 
    static Type discardQualifiers(const Type& other) {
       return Type(other.typeIndex_);
    }
-
-   Type(Kind integerKind, bool unsignedTy) : typeIndex_{Factory::construct(integerKind, unsignedTy)} {}
 
    static Type ptrTo(const Type& other);
 
@@ -111,21 +121,45 @@ class Type {
       return Type(*this);
    }
 
+   Kind kind() const {
+      return base().kind;
+   }
+
+   Type getRetTy() const {
+      return base().fnTy.retTy;
+   }
+
+   const std::vector<Type>& getArgTys() const {
+      return base().fnTy.argTys;
+   }
+
+   Type getElemTy() const {
+      return base().arrayTy.elemTy;
+   }
+
+   const std::vector<Type>& getMembers() const {
+      return base().structOrUnionTy.members;
+   }
+
    static Type commonRealType(op::Kind op, const Type& lhs, const Type& rhs);
 
    Base& base() const {
       return Factory::getTypes()[typeIndex_];
    }
 
+   typename _EmitterT::ty_t* emitterType() const {
+      return base().ref;
+   }
+
    unsigned short typeIndex() const {
       return typeIndex_;
    }
 
-   bool operator==(const Type<_IRValueRef>& other) const {
-      return qualifiers == other.qualifiers && base() == other.base();
+   bool operator==(const Type& other) const {
+      return qualifiers == other.qualifiers && typeIndex_ == other.typeIndex_; // base() == other.base();
    }
 
-   auto operator<=>(const Type<_IRValueRef>& other) const {
+   auto operator<=>(const Type& other) const {
       return base().rank() <=> other.base().rank();
    }
 
@@ -156,11 +190,11 @@ class Type {
 // todo: _Imaginary double
 // todo: _Complex long double
 // todo: _Imaginary long double
-template <typename _IRValueRef>
+template <typename _EmitterT>
 struct Base {
-   using TY = Type<_IRValueRef>;
-
-   Kind kind;
+   using TY = Type<_EmitterT>;
+   using emitter_ty_t = typename _EmitterT::ty_t;
+   using emitter_ssa_t = typename _EmitterT::ssa_t;
 
    Base() : kind{Kind::UNDEF} {}
 
@@ -227,6 +261,7 @@ struct Base {
       }
 
       kind = other.kind;
+      ref = other.ref;
       switch (kind) {
          case Kind::PTR_T:
             ptrTy = other.ptrTy;
@@ -260,6 +295,46 @@ struct Base {
       return rank() <=> other.rank();
    }
 
+   void populateEmitterType(_EmitterT& emitter) {
+      assert(!ref && "Emitter type already populated");
+
+      unsigned bits = 0;
+
+      if (kind == Kind::PTR_T) {
+         ref = emitter.emitPtrTo(ptrTy.emitterType());
+         return;
+      } else if (kind == Kind::FN_T) {
+         std::vector<emitter_ty_t*> argTys;
+         ref = emitter.emitFnTy(fnTy.retTy.emitterType(), argTys);
+         return;
+      }
+
+      switch (kind) {
+         case Kind::BOOL:
+            bits = 1;
+            break;
+         case Kind::CHAR:
+            bits = _EmitterT::CHAR_BITS;
+            break;
+         case Kind::SHORT:
+            bits = _EmitterT::SHORT_BITS;
+            break;
+         case Kind::INT:
+            bits = _EmitterT::INT_BITS;
+            break;
+         case Kind::LONG:
+            bits = _EmitterT::LONG_BITS;
+            break;
+         case Kind::LONGLONG:
+            bits = _EmitterT::LONG_LONG_BITS;
+            break;
+         default:
+            assert(false && "Invalid Base::Kind to populateEmitterType");
+            // todo: (jr) not implemented
+      }
+      ref = emitter.emitIntTy(bits);
+   }
+
    struct StructOrUnionTy {
       bool incomplete;
       unsigned tag;
@@ -288,10 +363,12 @@ struct Base {
       union {
          size_t fixedSize;
          // See also Example 5 in section 6.7.9.
-         _IRValueRef* valueRef;
+         emitter_ssa_t* valueRef;
       };
    };
 
+   Kind kind;
+   emitter_ty_t* ref;
    union {
       bool unsingedTy;
       TY ptrTy;
@@ -302,10 +379,11 @@ struct Base {
    };
 };
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
+template <typename _EmitterT>
 class BaseFactory {
-   using Base = Base<_IRValueRef>;
-   using TY = Type<_IRValueRef>;
+   using Base = Base<_EmitterT>;
+   using TY = Type<_EmitterT>;
+   using emitter_t = _EmitterT;
 
    public:
    class DeclTypeBaseRef {
@@ -315,7 +393,7 @@ class BaseFactory {
       DeclTypeBaseRef(const TY& ty) : typeIndex_{ty.typeIndex()} {}
 
       TY& operator*() const {
-         Base& base = BaseFactory::getTypes()[typeIndex_];
+         Base& base = underlyingBase();
          switch (base.kind) {
             case Kind::PTR_T:
                return base.ptrTy;
@@ -332,6 +410,10 @@ class BaseFactory {
          // todo: what to return here?
       }
 
+      TY* operator->() const {
+         return &**this;
+      }
+
       void chain(TY ty) {
          DeclTypeBaseRef& _this = *this;
 
@@ -344,24 +426,61 @@ class BaseFactory {
       }
 
       operator bool() const {
-         return typeIndex_ != 0;
+         Base& base = underlyingBase();
+
+         return base.kind > Kind::VOID && base.kind != Kind::UNDEF;
       }
 
       private:
+      Base& underlyingBase() const {
+         return BaseFactory::getTypeFragemts()[typeIndex_];
+      }
+
       unsigned short typeIndex_;
    };
 
    template <typename... Args>
    static unsigned short construct(Args... args);
 
+   static TY harden(TY ty) {
+      assert(emitter && "Emitter not set");
+      // todo: (jr) members and arguments should be hardened as well
+      // todo: aks alexis how to handle this
+      DeclTypeBaseRef base{ty};
+      if (base) {
+         *base = harden(*base);
+      }
+
+      // check if there is already a type with the same base
+      auto it = std::find(types.begin(), types.end(), typeFragments[ty.typeIndex_]);
+      if (it != types.end()) {
+         ty.typeIndex_ = static_cast<unsigned short>(std::distance(types.begin(), it));
+         return ty;
+      }
+
+      types.emplace_back(std::move(typeFragments[ty.typeIndex_]));
+      ty.typeIndex_ = types.size() - 1;
+      ty.base().populateEmitterType(*emitter);
+      return ty;
+   }
+
+   static void setEmitter(emitter_t& emitter) {
+      BaseFactory::emitter = &emitter;
+   }
+
    static std::vector<Base>& getTypes();
+   static std::vector<Base>& getTypeFragemts();
 
    private:
+   static emitter_t* emitter;
+   static std::size_t lastSortedIndex;
+   static std::size_t lastHardenedIndex;
    static std::vector<Base> types;
+   static std::vector<Base> typeFragments;
 };
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
-std::ostream& operator<<(std::ostream& os, const Base<_IRValueRef>& ty) {
+template <typename _EmitterT>
+std::ostream& operator<<(std::ostream& os, const Base<_EmitterT>& ty) {
    static const char* names[] = {
        // clang-format off
       "bool", "char", "short", "int", "long", "long long",
@@ -430,8 +549,8 @@ std::ostream& operator<<(std::ostream& os, const Base<_IRValueRef>& ty) {
    return os;
 }
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
-std::ostream& operator<<(std::ostream& os, const Type<_IRValueRef>& ty) {
+template <typename _EmitterT>
+std::ostream& operator<<(std::ostream& os, const Type<_EmitterT>& ty) {
    if (ty.qualifiers.CONST) {
       os << "const ";
    }
@@ -450,8 +569,8 @@ std::ostream& operator<<(std::ostream& os, const Type<_IRValueRef>& ty) {
 // ---------------------------------------------------------------------------
 // Type
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
-Type<_IRValueRef> Type<_IRValueRef>::fromToken(const Token& token) {
+template <typename _EmitterT>
+Type<_EmitterT> Type<_EmitterT>::fromToken(const Token& token) {
    token::Kind tk = token.getKind();
    if (tk >= token::Kind::ICONST && tk <= token::Kind::LDCONST) {
       return fromConstToken(token);
@@ -460,8 +579,8 @@ Type<_IRValueRef> Type<_IRValueRef>::fromToken(const Token& token) {
    return Type();
 }
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
-Type<_IRValueRef> Type<_IRValueRef>::fromConstToken(const Token& token) {
+template <typename _EmitterT>
+Type<_EmitterT> Type<_EmitterT>::fromConstToken(const Token& token) {
    token::Kind tk = token.getKind();
    assert(tk >= token::Kind::ICONST && tk <= token::Kind::LDCONST && "Invalid token::Kind to create Type from");
 
@@ -480,13 +599,13 @@ Type<_IRValueRef> Type<_IRValueRef>::fromConstToken(const Token& token) {
    return Type(static_cast<Kind>(tVal), hasSigness && (tkVal & 1));
 }
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
-Type<_IRValueRef> Type<_IRValueRef>::ptrTo(const Type<_IRValueRef>& other) {
+template <typename _EmitterT>
+Type<_EmitterT> Type<_EmitterT>::ptrTo(const Type& other) {
    return Type{Factory::construct(other)};
 }
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
-Type<_IRValueRef> Type<_IRValueRef>::commonRealType(op::Kind kind, const Type& lhs, const Type& rhs) {
+template <typename _EmitterT>
+Type<_EmitterT> Type<_EmitterT>::commonRealType(op::Kind kind, const Type& lhs, const Type& rhs) {
    // todo: undef not necessary in when type of identifier is known
    if (lhs.base().kind == Kind::UNDEF || rhs.base().kind == Kind::UNDEF) {
       return Type();
@@ -536,8 +655,8 @@ Type<_IRValueRef> Type<_IRValueRef>::commonRealType(op::Kind kind, const Type& l
 // ---------------------------------------------------------------------------
 // Base
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
-bool Base<_IRValueRef>::operator==(const Base& other) const {
+template <typename _EmitterT>
+bool Base<_EmitterT>::operator==(const Base& other) const {
    if (kind != other.kind) {
       return false;
    }
@@ -574,8 +693,8 @@ bool Base<_IRValueRef>::operator==(const Base& other) const {
    }
 }
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
-int Base<_IRValueRef>::rank() const {
+template <typename _EmitterT>
+int Base<_EmitterT>::rank() const {
    if (kind == Kind::ENUM_T) {
       return enumTy.underlyingType.base().rank();
    }
@@ -590,28 +709,30 @@ int Base<_IRValueRef>::rank() const {
 // ---------------------------------------------------------------------------
 // BaseFactory
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
-std::vector<Base<_IRValueRef>> BaseFactory<_IRValueRef>::types(1);
+template <typename _EmitterT>
+std::vector<Base<_EmitterT>> BaseFactory<_EmitterT>::types{};
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
+template <typename _EmitterT>
+std::vector<Base<_EmitterT>> BaseFactory<_EmitterT>::typeFragments(1);
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+_EmitterT* BaseFactory<_EmitterT>::emitter = nullptr;
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
 template <typename... Args>
-unsigned short BaseFactory<_IRValueRef>::construct(Args... args) {
-   if (types.empty()) {
-      types.emplace_back(Kind::UNDEF);
-   }
-
-   auto it = std::find(types.begin(), types.end(), Base(args...));
-
-   if (it != types.end()) {
-      return std::distance(types.begin(), it);
-   }
-   types.emplace_back(args...);
-   return types.size() - 1;
+unsigned short BaseFactory<_EmitterT>::construct(Args... args) {
+   typeFragments.emplace_back(args...);
+   return typeFragments.size() - 1;
 }
 // ---------------------------------------------------------------------------
-template <typename _IRValueRef>
-std::vector<typename BaseFactory<_IRValueRef>::Base>& BaseFactory<_IRValueRef>::getTypes() {
+template <typename _EmitterT>
+std::vector<Base<_EmitterT>>& BaseFactory<_EmitterT>::getTypes() {
    return types;
+}
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+std::vector<Base<_EmitterT>>& BaseFactory<_EmitterT>::getTypeFragemts() {
+   return typeFragments;
 }
 // ---------------------------------------------------------------------------
 } // namespace type
