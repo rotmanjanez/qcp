@@ -34,6 +34,9 @@ enum class Kind {
 };
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
+struct TaggedType;
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
 class Type {
    using Base = Base<_EmitterT>;
    using Factory = BaseFactory<_EmitterT>;
@@ -76,12 +79,12 @@ class Type {
    }
 
    // todo: replace with move
-   static Type function(const Type& retTy, const std::vector<Type>& argTys, bool isVarArg = false) {
+   static Type function(const Type& retTy, const std::vector<TaggedType<_EmitterT>>& argTys, bool isVarArg = false) {
       return Type{Factory::construct(retTy, argTys, isVarArg)};
    }
 
    // todo: replace with move
-   static Type structOrUnion(token::Kind tk, const std::vector<Type>& members, bool incomplete) {
+   static Type structOrUnion(token::Kind tk, const std::vector<TaggedType<_EmitterT>>& members, bool incomplete) {
       return Type{Factory::construct(tk, members, incomplete)};
    }
 
@@ -118,7 +121,7 @@ class Type {
    Type promote() const {
       // todo: assert(Base().kind <= Kind::LONGLONG && "Invalid Base::Kind to promote()");
       // todo: promote integers
-      return Type(*this);
+      return *this;
    }
 
    Kind kind() const {
@@ -129,7 +132,7 @@ class Type {
       return base().fnTy.retTy;
    }
 
-   const std::vector<Type>& getArgTys() const {
+   const std::vector<TaggedType<_EmitterT>>& getArgTys() const {
       return base().fnTy.argTys;
    }
 
@@ -137,7 +140,7 @@ class Type {
       return base().arrayTy.elemTy;
    }
 
-   const std::vector<Type>& getMembers() const {
+   const std::vector<TaggedType<_EmitterT>>& getMembers() const {
       return base().structOrUnionTy.members;
    }
 
@@ -168,9 +171,8 @@ class Type {
    }
 
    struct qualifiers {
-      bool operator==(const qualifiers& other) const {
-         return CONST == other.CONST && RESTRICT == other.RESTRICT && VOLATILE == other.VOLATILE;
-      }
+      bool operator==(const qualifiers& other) const = default;
+      bool operator!=(const qualifiers& other) const = default;
 
       bool CONST = false;
       bool RESTRICT = false;
@@ -183,6 +185,45 @@ class Type {
    unsigned short typeIndex_;
 };
 // ---------------------------------------------------------------------------
+template <typename _EmitterT>
+struct TaggedType {
+   using Type = Type<_EmitterT>;
+
+   TaggedType(const TaggedType& other) = default;
+   TaggedType(TaggedType&& other) = default;
+   TaggedType& operator=(const TaggedType& other) = default;
+   TaggedType& operator=(TaggedType&& other) = default;
+
+   TaggedType(Ident name, Type ty) : name{name}, ty{ty} {}
+
+   bool operator==(const TaggedType& other) const {
+      return ty == other.ty;
+   }
+
+   auto operator<=>(const TaggedType& other) const {
+      return ty <=> other.ty;
+   }
+
+   operator bool() const {
+      return ty;
+   }
+
+   template <typename T>
+   friend std::ostream& operator<<(std::ostream& os, const TaggedType<T>& ty);
+
+   Ident name{};
+   Type ty{};
+};
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+std::ostream& operator<<(std::ostream& os, const TaggedType<_EmitterT>& ty) {
+   if (ty.name) {
+      os << ty.name << ": ";
+   }
+   os << ty.ty;
+   return os;
+}
+// ---------------------------------------------------------------------------
 // todo: _BitInt(N)
 // todo: _Complex float
 // todo: _Imaginary float
@@ -193,6 +234,7 @@ class Type {
 template <typename _EmitterT>
 struct Base {
    using TY = Type<_EmitterT>;
+   using TaggedTY = TaggedType<_EmitterT>;
    using emitter_ty_t = typename _EmitterT::ty_t;
    using emitter_ssa_t = typename _EmitterT::ssa_t;
 
@@ -213,10 +255,10 @@ struct Base {
 
    // function type
    // todo: replace with move
-   Base(TY retTy, const std::vector<TY>& argTys, bool isVarArg) : kind{Kind::FN_T}, fnTy{argTys, retTy, isVarArg} {}
+   Base(TY retTy, const std::vector<TaggedTY>& argTys, bool isVarArg) : kind{Kind::FN_T}, fnTy{argTys, retTy, isVarArg} {}
 
    // Struct or Union type
-   Base(token::Kind tk, std::vector<TY> members, bool incomplete) : kind{tk == token::Kind::STRUCT ? Kind::STRUCT_T : Kind::UNION_T}, structOrUnionTy{incomplete, 0, members} {
+   Base(token::Kind tk, std::vector<TaggedTY> members, bool incomplete) : kind{tk == token::Kind::STRUCT ? Kind::STRUCT_T : Kind::UNION_T}, structOrUnionTy{incomplete, 0, members} {
       assert(tk == token::Kind::STRUCT || tk == token::Kind::UNION && "Invalid token::Kind for struct or union");
    }
 
@@ -305,9 +347,13 @@ struct Base {
          return;
       } else if (kind == Kind::FN_T) {
          std::vector<emitter_ty_t*> argTys;
+         for (const auto& argTy : fnTy.argTys) {
+            // todo: (jr) very inefficient
+            argTys.push_back(argTy.ty.emitterType());
+         }
          ref = emitter.emitFnTy(fnTy.retTy.emitterType(), argTys);
          return;
-      }
+      } // todo: struct, union, enum
 
       switch (kind) {
          case Kind::BOOL:
@@ -338,7 +384,7 @@ struct Base {
    struct StructOrUnionTy {
       bool incomplete;
       unsigned tag;
-      std::vector<TY> members;
+      std::vector<TaggedTY> members;
       // todo: XXX attributes; // e.g. __attribute__((packed))
       // todo: XXX members; // might have flexible array member; might have bitfields; might be anonymous union or structures, might have alignas()
    };
@@ -349,9 +395,8 @@ struct Base {
       TY underlyingType;
    };
 
-   // todo: vector in union not possible
    struct FnTy {
-      std::vector<TY> argTys;
+      std::vector<TaggedTY> argTys;
       TY retTy;
       bool isVarArg;
    };
@@ -444,8 +489,6 @@ class BaseFactory {
 
    static TY harden(TY ty) {
       assert(emitter && "Emitter not set");
-      // todo: (jr) members and arguments should be hardened as well
-      // todo: aks alexis how to handle this
       DeclTypeBaseRef base{ty};
       if (base) {
          *base = harden(*base);
@@ -596,7 +639,8 @@ Type<_EmitterT> Type<_EmitterT>::fromConstToken(const Token& token) {
       tVal = static_cast<int>(Kind::FLOAT) + tkVal - static_cast<int>(token::Kind::FCONST);
    }
 
-   return Type(static_cast<Kind>(tVal), hasSigness && (tkVal & 1));
+   Type ty{Factory::construct(static_cast<Kind>(tVal), hasSigness && (tkVal & 1))};
+   return Factory::harden(ty);
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
@@ -628,26 +672,21 @@ Type<_EmitterT> Type<_EmitterT>::commonRealType(op::Kind kind, const Type& lhs, 
 
    // integer promotion
    // todo: what happens with qualifiers?
-   const Type& lhsPromoted{lhs.promote()};
-   const Type& rhsPromoted{rhs.promote()};
+   const Type lhsPromoted{lhs.promote()};
+   const Type rhsPromoted{rhs.promote()};
 
    if (lhsPromoted == rhsPromoted) {
-      std::cout << "lhsPromoted == rhsPromoted\n";
       return Type::discardQualifiers(lhsPromoted);
    } else if (lhsPromoted.base().unsingedTy == rhsPromoted.base().unsingedTy) {
-      std::cout << "same signess\n";
       return Type::discardQualifiers(lhsPromoted > rhsPromoted ? lhsPromoted : rhsPromoted);
    } else {
       const Type& unsignedTy = lhsPromoted.base().unsingedTy ? lhsPromoted : rhsPromoted;
       const Type& signedTy = lhsPromoted.base().unsingedTy ? rhsPromoted : lhsPromoted;
       if (unsignedTy >= signedTy) {
-         std::cout << "unsignedTy >= signedTy\n";
          return Type::discardQualifiers(unsignedTy);
       } else if (signedTy > unsignedTy) {
-         std::cout << "signedTy > unsignedTy\n";
          return Type::discardQualifiers(signedTy);
       } else {
-         std::cout << "signed but unsigned\n";
          return Type(signedTy.base().kind, true);
       }
    }

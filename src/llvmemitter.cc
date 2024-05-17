@@ -45,6 +45,32 @@ Instr::OtherOps toLLVMOtherOp(OpKind kind) {
    }
 }
 // ---------------------------------------------------------------------------
+Instr::BinaryOps decomposeAssignOp(OpKind kind) {
+   switch (kind) {
+      case OpKind::ADD_ASSIGN: return Instr::Add;
+      case OpKind::SUB_ASSIGN: return Instr::Sub;
+      case OpKind::MUL_ASSIGN: return Instr::Mul;
+      case OpKind::DIV_ASSIGN: return Instr::SDiv;
+      case OpKind::REM_ASSIGN: return Instr::SRem;
+      case OpKind::SHL_ASSIGN: return Instr::Shl;
+      case OpKind::SHR_ASSIGN: return Instr::AShr;
+      case OpKind::BW_AND_ASSIGN: return Instr::And;
+      case OpKind::BW_XOR_ASSIGN: return Instr::Xor;
+      case OpKind::BW_OR_ASSIGN: return Instr::Or;
+      default: return llvm::Instruction::BinaryOps::BinaryOpsEnd;
+   }
+}
+// ---------------------------------------------------------------------------
+std::pair<bool, Instr::BinaryOps> decomposeIncDecOp(OpKind kind) {
+   switch (kind) {
+      case OpKind::POSTINC: return {true, Instr::Add};
+      case OpKind::POSTDEC: return {true, Instr::Sub};
+      case OpKind::PREINC: return {false, Instr::Add};
+      case OpKind::PREDEC: return {false, Instr::Sub};
+      default: return {false, llvm::Instruction::BinaryOps::BinaryOpsEnd};
+   }
+}
+// ---------------------------------------------------------------------------
 } // namespace
 // ---------------------------------------------------------------------------
 namespace qcp {
@@ -70,12 +96,43 @@ typename LLVMEmitter::bb_t* LLVMEmitter::emitFn(fn_t* fnProto) {
    return llvm::BasicBlock::Create(Ctx, "entry", fnProto);
 }
 // ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::getParam(fn_t* fn, unsigned idx) {
+   return fn->getArg(idx);
+}
+// ---------------------------------------------------------------------------
 typename LLVMEmitter::bb_t* LLVMEmitter::emitBB(Ident name, fn_t* fn) {
    return llvm::BasicBlock::Create(Ctx, static_cast<std::string>(name).c_str(), fn);
 }
 // ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitAlloca(bb_t* bb, ty_t* ty, Ident name) {
+   Builder.SetInsertPoint(bb);
+   return Builder.CreateAlloca(ty, nullptr, static_cast<std::string>(name).c_str());
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitLoad(bb_t* bb, Ident name, ty_t* ty, ssa_t* ptr) {
+   Builder.SetInsertPoint(bb);
+   return Builder.CreateLoad(ty, ptr, static_cast<std::string>(name).c_str());
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitStore(bb_t* bb, ssa_t* value, ssa_t* ptr) {
+   Builder.SetInsertPoint(bb);
+   return Builder.CreateStore(value, ptr);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitJump(bb_t* bb, bb_t* target) {
+   return llvm::BranchInst::Create(target, bb);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitBranch(bb_t* bb, bb_t* trueBB, bb_t* falseBB, ssa_t* cond) {
+   return llvm::BranchInst::Create(trueBB, falseBB, cond, bb);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitRet(bb_t* bb, ssa_t* value) {
+   return llvm::ReturnInst::Create(Ctx, value, bb);
+}
+// ---------------------------------------------------------------------------
 typename LLVMEmitter::ssa_t* LLVMEmitter::emitConst(bb_t* bb, ty_t* ty, Ident name, long value) {
-   return llvm::ConstantInt::get(ty, value);
+   return llvm::ConstantInt::get(ty, value, true);
 }
 // ---------------------------------------------------------------------------
 typename LLVMEmitter::phi_t* LLVMEmitter::emitPhi(bb_t* bb, Ident name, ty_t* ty) {
@@ -87,13 +144,28 @@ void LLVMEmitter::addIncoming(Ident name, phi_t* phi, ssa_t* value, bb_t* bb) {}
 typename LLVMEmitter::ssa_t* LLVMEmitter::emitBinOp(bb_t* bb, Ident name, op::Kind kind, ssa_t* lhs, ssa_t* rhs) {
    if (auto binOp = toLLVMBinOp(kind); binOp != Instr::BinaryOps::BinaryOpsEnd) {
       return llvm::BinaryOperator::Create(binOp, lhs, rhs, static_cast<std::string>(name).c_str(), bb);
+   } else if (decomposeAssignOp(kind) != Instr::BinaryOps::BinaryOpsEnd) {
+      auto* result = llvm::BinaryOperator::Create(decomposeAssignOp(kind), lhs, rhs, "", bb);
+      Builder.CreateStore(result, lhs);
+      return result;
+   } else if (kind == OpKind::ASSIGN) {
+      Builder.CreateStore(rhs, lhs);
+      return lhs;
    }
+   assert(false && "not implemented");
    // else if (auto otherOp = toLLVMOtherOp(kind); otherOp != Instr::OtherOps::OtherOpsEnd) {
    //   return llvm::CmpInst::Create(otherOp, llvm::CmpInst::Predicate::ICMP_EQ, lhs, rhs, static_cast<std::string>(name).c_str(), bb);
    // }
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitUnOp(bb_t* bb, Ident name, op::Kind kind, ssa_t* operand) { return nullptr; }
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitUnOp(bb_t* bb, Ident name, op::Kind kind, ssa_t* operand) {
+   if (auto [postInc, op] = decomposeIncDecOp(kind); op != Instr::BinaryOps::BinaryOpsEnd) {
+      auto* result = llvm::BinaryOperator::Create(op, operand, llvm::ConstantInt::get(operand->getType(), 1), "", bb);
+      Builder.CreateStore(result, operand);
+      return postInc ? operand : result;
+   }
+   assert(false && "not implemented");
+}
 // ---------------------------------------------------------------------------
 } // namespace emitter
 } // namespace qcp

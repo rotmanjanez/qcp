@@ -26,6 +26,7 @@ class Parser {
 
    using TYK = type::Kind;
    using TY = type::Type<_EmitterT>;
+   using TaggedTY = type::TaggedType<_EmitterT>;
    using Factory = type::BaseFactory<_EmitterT>;
    using DeclTypeBaseRef = typename Factory::DeclTypeBaseRef;
 
@@ -33,19 +34,23 @@ class Parser {
 
    using attr_t = Token;
 
-   using Expr = Expr<TY>;
-   using ssa = std::unique_ptr<Expr>;
    using bb_t = typename _EmitterT::bb_t;
    using phi_t = typename _EmitterT::phi_t;
    using ssa_t = typename _EmitterT::ssa_t;
    using ty_t = typename _EmitterT::ty_t;
    using fn_t = typename _EmitterT::fn_t;
 
+   using Scope = Scope<Ident, std::pair<TY, ssa_t*>>;
+   using Expr = Expr<_EmitterT>;
+   using expr_t = std::unique_ptr<Expr>;
+
    Parser(std::string_view prog, DiagnosticTracker& diagnostics, std::ostream& logStream = std::cout) : tokenizer_{prog, diagnostics},
                                                                                                         pos_{tokenizer_.begin()},
                                                                                                         diagnostics_{diagnostics},
                                                                                                         tracer_{logStream} {
       Factory::setEmitter(emitter_);
+      Expr::setEmitter(emitter_);
+      Expr::setScope(scope_);
    }
 
    /*
@@ -66,10 +71,18 @@ class Parser {
          if (pos_->getKind() == TK::L_C_BRKT) {
             tracer_ << ENTER{"function-definition"};
             fn_ = emitter_.emitFnProto(name, declTy.emitterType());
-            auto fn_entry_ = emitter_.emitFn(fn_);
+            entry_ = emitter_.emitFn(fn_);
+
+            for (unsigned i = 0; i < declTy.getArgTys().size(); ++i) {
+               TaggedTY argTy = declTy.getArgTys()[i];
+               ssa_t* argValue = emitter_.getParam(fn_, i);
+               ssa_t* argAllocaValue = emitter_.emitAlloca(entry_, argTy.ty.emitterType(), argTy.name);
+               emitter_.emitStore(entry_, argValue, argAllocaValue);
+               scope_.insert(argTy.name, std::make_pair(argTy.ty, argAllocaValue));
+            }
 
             // function-definition
-            parseCompoundStmt(fn_entry_);
+            parseCompoundStmt(entry_);
             tracer_ << EXIT{"function-definition"};
          } else {
             assert(false && "not implemented");
@@ -88,8 +101,8 @@ class Parser {
    bb_t* parseCompoundStmt(bb_t* parent);
    bb_t* parseUnlabledStmt(bb_t* parent, const std::vector<attr_t>& attr);
    bb_t* parseDeclStmt(bb_t* parent, const std::vector<attr_t>& attr);
-   ssa parseExpr(short midPrec = 0);
-   ssa parsePrimaryExpr();
+   expr_t parseExpr(bb_t* parent, short midPrec = 0);
+   expr_t parsePrimaryExpr(bb_t* parent);
    TY parseTypeName();
    TY parseSpecifierQualifierList();
    TY parseDeclarationSpecifierList(bool storageClassSpecifiers = true, bool functionSpecifiers = true);
@@ -108,7 +121,7 @@ class Parser {
    std::pair<TY, Ident> parseDeclarator(TY specifierQualifier);
 
    Declarator parseDeclaratorImpl();
-   std::vector<TY> parseParameterList();
+   std::vector<TaggedTY> parseParameterList();
 
    template <typename... Tokens>
    Token consumeAnyOf(Tokens... tokens) {
@@ -144,8 +157,11 @@ class Parser {
    Tokenizer tokenizer_;
    typename Tokenizer::const_iterator pos_;
    _EmitterT emitter_{};
+
    fn_t* fn_ = nullptr;
-   Scope<Ident, TY> scope_{};
+   bb_t* entry_ = nullptr;
+
+   Scope scope_{};
    DiagnosticTracker& diagnostics_;
    Tracer tracer_;
 };
@@ -229,21 +245,29 @@ bool isPrimaryBlockStart(token::Kind kind) {
 // Parser
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-std::vector<typename Parser<_EmitterT>::TY> Parser<_EmitterT>::parseParameterList() {
-   std::vector<TY> params;
+std::vector<typename Parser<_EmitterT>::TaggedTY> Parser<_EmitterT>::parseParameterList() {
+   tracer_ << ENTER{"parseParameterList"};
+   std::vector<TaggedTY> params;
    while (isDeclarationSpecifier(pos_->getKind())) {
       parseOptAttributeSpecifierSequence();
       TY ty = parseSpecifierQualifierList();
+      Ident name{};
 
       // todo: (jr) not abstract declarator
       // todo: (jr) isDeclaratorStart
-      if (isAbstractDeclaratorStart(pos_->getKind())) {
-         Declarator decl = parseDeclaratorImpl();
-         *decl.base = ty;
-         ty = decl.ty;
+      if (isDeclaratorStart(pos_->getKind())) {
+         // todo: handle names in casts/abstract declerators
+         auto [declTy, declName] = parseDeclarator(ty);
+         scope_.insert(name, std::make_pair(declTy, nullptr)); // todo: (jr) error on failure
+         ty = declTy;
+         name = declName;
+      } else if (isAbstractDeclaratorStart(pos_->getKind())) {
+         ty = parseAbstractDeclarator(ty);
       }
-      params.push_back(ty);
+      tracer_ << "parameter: " << ty << std::endl;
+      params.push_back(TaggedTY{name, ty});
    }
+   tracer_ << EXIT{"parseParameterList"};
    return params;
 }
 // ---------------------------------------------------------------------------
@@ -251,7 +275,7 @@ template <typename _EmitterT>
 typename Parser<_EmitterT>::bb_t* Parser<_EmitterT>::parseStmt(bb_t* parent) {
    tracer_ << ENTER{"parseStmt"};
    std::vector<attr_t> attr = parseOptAttributeSpecifierSequence();
-   ssa expr;
+   expr_t expr;
 
    Token t = *pos_;
    TK kind = t.getKind();
@@ -290,9 +314,11 @@ typename Parser<_EmitterT>::bb_t* Parser<_EmitterT>::parseDeclStmt(bb_t* parent,
 
       do {
          auto [declTy, name] = parseDeclarator(ty);
-         scope_.insert(name, declTy);
          tracer_ << "declarator: " << name << std::endl;
          tracer_ << "type: " << declTy << std::endl;
+
+         ssa_t* ptr = emitter_.emitAlloca(entry_, declTy.emitterType(), name);
+         scope_.insert(name, std::make_pair(declTy, ptr));
 
          // todo: (jr) initializer
 
@@ -304,7 +330,7 @@ typename Parser<_EmitterT>::bb_t* Parser<_EmitterT>::parseDeclStmt(bb_t* parent,
                expect(TK::R_C_BRKT);
             } else {
                // expression
-               auto expr = parseExpr();
+               auto expr = parseExpr(parent);
                tracer_ << " = " << *expr << std::endl;
                // todo: handle semantics
             }
@@ -345,18 +371,22 @@ typename Parser<_EmitterT>::bb_t* Parser<_EmitterT>::parseUnlabledStmt(bb_t* par
    tracer_ << ENTER{"parseUnlabledStmt"};
    Token t = *pos_;
    TK kind = t.getKind();
+   bb_t* cont = nullptr;
+
    if (kind == TK::L_C_BRKT) {
       // todo: attribute-specifier-sequenceopt
       parseCompoundStmt(parent);
+      cont = parent;
    } else if (isSelectionStmtStart(kind)) {
       // selection-statement
       // todo: ask alexis about string literals in emitter
       bb_t* then = emitter_.emitBB(Ident("then"), fn_);
-      bb_t* otherwise;
+      bb_t* otherwise = nullptr;
+      expr_t cond;
 
       if (consumeAnyOf(TK::IF)) {
          expect(TK::L_BRACE);
-         ssa cond = parseExpr();
+         cond = parseExpr(parent);
          expect(TK::R_BRACE);
          parseStmt(then);
 
@@ -368,24 +398,33 @@ typename Parser<_EmitterT>::bb_t* Parser<_EmitterT>::parseUnlabledStmt(bb_t* par
       } else {
          expect(TK::SWITCH);
          expect(TK::L_BRACE);
-         ssa cond = parseExpr();
+         cond = parseExpr(parent);
          expect(TK::R_BRACE);
          // todo: parseStmt();
       }
+
+      cont = emitter_.emitBB(Ident("cont"), fn_);
+      if (otherwise) {
+         emitter_.emitBranch(parent, then, otherwise, cond->ssa(parent));
+         emitter_.emitJump(otherwise, cont);
+      } else {
+         emitter_.emitBranch(parent, then, cont, cond->ssa(parent));
+      }
+      emitter_.emitJump(then, cont);
    } else if (isIterationStmtStart(kind)) {
       // iteration-statement
-      ssa cond;
+      expr_t cond;
       bb_t* body = emitter_.emitBB(Ident("body"), fn_);
       if (consumeAnyOf(TK::WHILE)) {
          expect(TK::L_BRACE);
-         cond = parseExpr();
+         cond = parseExpr(parent);
          expect(TK::R_BRACE);
          parseStmt(body);
       } else if (consumeAnyOf(TK::DO)) {
          parseStmt(body);
          expect(TK::WHILE);
          expect(TK::L_BRACE);
-         cond = parseExpr();
+         cond = parseExpr(parent);
          expect(TK::R_BRACE);
       } else {
          expect(TK::FOR);
@@ -397,11 +436,26 @@ typename Parser<_EmitterT>::bb_t* Parser<_EmitterT>::parseUnlabledStmt(bb_t* par
    } else if (isJumpStmtStart(kind)) {
       // jump-statement
       // todo: (jr) not implemented
+      if (consumeAnyOf(TK::GOTO)) {
+      } else if (consumeAnyOf(TK::CONTINUE)) {
+      } else if (consumeAnyOf(TK::BREAK)) {
+      } else if (consumeAnyOf(TK::RETURN)) {
+         if (consumeAnyOf(TK::SEMICOLON)) {
+            emitter_.emitRet(parent, nullptr);
+         } else {
+            expr_t expr = parseExpr(parent);
+            expect(TK::SEMICOLON);
+            emitter_.emitRet(parent, expr->ssa(parent));
+         }
+      } else {
+         assert(false && "not implemented");
+      }
    } else {
-      ssa expr;
       // expression-statement
+      expr_t expr;
+      cont = parent;
       if (pos_->getKind() != TK::SEMICOLON) {
-         expr = parseExpr();
+         expr = parseExpr(parent);
       }
       expect(TK::SEMICOLON);
       if (!expr && !attr.empty()) {
@@ -409,14 +463,15 @@ typename Parser<_EmitterT>::bb_t* Parser<_EmitterT>::parseUnlabledStmt(bb_t* par
       }
    }
    tracer_ << EXIT{"parseUnlabledStmt"};
+   return cont;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-Parser<_EmitterT>::ssa Parser<_EmitterT>::parseExpr(short midPrec) {
+Parser<_EmitterT>::expr_t Parser<_EmitterT>::parseExpr(bb_t* parent, short midPrec) {
    tracer_ << ENTER{"parseExpr"};
    tracer_ << "current token: " << *pos_ << std::endl;
 
-   ssa lhs = parsePrimaryExpr();
+   expr_t lhs = parsePrimaryExpr(parent);
    tracer_ << "current token: " << *pos_ << std::endl;
    while (*pos_ && pos_->getKind() != TK::SEMICOLON) {
       op::OpSpec spec{op::getOpSpec(*pos_)};
@@ -435,19 +490,19 @@ Parser<_EmitterT>::ssa Parser<_EmitterT>::parseExpr(short midPrec) {
             return lhs;
          case TK::INC:
          case TK::DEC:
-            lhs = std::make_unique<Expr>(tk == TK::INC ? op::Kind::POSTINC : op::Kind::POSTDEC, std::move(lhs));
+            lhs = std::make_unique<Expr>(parent, tk == TK::INC ? op::Kind::POSTINC : op::Kind::POSTDEC, std::move(lhs));
             ++pos_;
             continue;
          case TK::L_BRACKET:
             ++pos_;
-            lhs = std::make_unique<Expr>(op::Kind::SUBSCRIPT, 1, true, std::move(lhs), parseExpr());
+            lhs = std::make_unique<Expr>(parent, op::Kind::SUBSCRIPT, std::move(lhs), parseExpr(parent));
             expect(TK::R_BRACKET);
             continue;
          case TK::DEREF:
          case TK::PERIOD:
             ++pos_;
             assert(pos_->getKind() == TK::IDENT && "member access"); // todo: (jr) not implemented
-            lhs = std::make_unique<Expr>(tk == TK::DEREF ? op::Kind::MEMBER_DEREF : op::Kind::MEMBER, std::move(lhs), std::make_unique<Expr>(*pos_));
+            lhs = std::make_unique<Expr>(parent, tk == TK::DEREF ? op::Kind::MEMBER_DEREF : op::Kind::MEMBER, std::move(lhs), std::make_unique<Expr>(parent, *pos_));
             ++pos_;
             continue;
          case TK::L_BRACE:
@@ -457,18 +512,20 @@ Parser<_EmitterT>::ssa Parser<_EmitterT>::parseExpr(short midPrec) {
             ++pos_;
       }
 
-      ssa rhs = parseExpr(spec.precedence + spec.leftAssociative);
-      lhs = std::make_unique<Expr>(op::getBinOpKind(tk), std::move(lhs), std::move(rhs));
+      expr_t rhs = parseExpr(parent, spec.precedence + !spec.leftAssociative);
+      tracer_ << "create binop " << std::endl;
+      lhs = std::make_unique<Expr>(parent, op::getBinOpKind(tk), std::move(lhs), std::move(rhs));
+      tracer_ << "current token: " << *pos_ << std::endl;
    }
    tracer_ << EXIT{"parseExpr"};
    return lhs;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-Parser<_EmitterT>::ssa Parser<_EmitterT>::parsePrimaryExpr() {
+Parser<_EmitterT>::expr_t Parser<_EmitterT>::parsePrimaryExpr(bb_t* parent) {
    tracer_ << ENTER{"parsePrimaryExpr"};
    tracer_ << "current token: " << *pos_ << std::endl;
-   ssa expr;
+   expr_t expr;
    op::Kind kind;
    Token t = *pos_;
 
@@ -482,16 +539,19 @@ Parser<_EmitterT>::ssa Parser<_EmitterT>::parsePrimaryExpr() {
       case TK::FCONST:
       case TK::DCONST:
       case TK::LDCONST:
-         expr = std::make_unique<Expr>(t);
+         expr = std::make_unique<Expr>(parent, t);
          // todo:expr->isConstExpr = true;
          ++pos_;
          break;
       case TK::IDENT:
+         expr = std::make_unique<Expr>(parent, t.getValue<Ident>());
+         ++pos_;
+         break;
       case TK::SLITERAL:
       case TK::WB_ICONST:
       case TK::UWB_ICONST:
          // todo: (jr) is this also a string? case TK::CLITERAL:
-         expr = std::make_unique<Expr>(t);
+         expr = std::make_unique<Expr>(parent, t);
          ++pos_;
          break;
 
@@ -501,9 +561,9 @@ Parser<_EmitterT>::ssa Parser<_EmitterT>::parsePrimaryExpr() {
          if (isTypeSpecifierQualifier(pos_->getKind())) {
             TY ty = parseTypeName();
             expect(TK::R_BRACE);
-            expr = std::make_unique<Expr>(op::Kind::CAST, ty, parseExpr(2));
+            expr = std::make_unique<Expr>(parent, op::Kind::CAST, ty, parseExpr(parent, 2));
          } else {
-            expr = parseExpr();
+            expr = parseExpr(parent);
             expr->setPrec(0);
             expect(TK::R_BRACE);
          }
@@ -574,7 +634,7 @@ Parser<_EmitterT>::ssa Parser<_EmitterT>::parsePrimaryExpr() {
                return expr;
          }
          ++pos_;
-         expr = std::make_unique<Expr>(kind, 2, false, parseExpr(2));
+         expr = std::make_unique<Expr>(parent, kind, parseExpr(parent, 2));
    }
    tracer_ << EXIT{"parsePrimaryExpr"};
    return expr;
@@ -675,12 +735,12 @@ typename Parser<_EmitterT>::Declarator Parser<_EmitterT>::parseDeclaratorImpl() 
    while (Token t = consumeAnyOf(TK::L_BRACKET, TK::L_BRACE)) {
       TK kind = t.getKind();
       if (kind == TK::L_BRACKET) {
+         // array-declarator
          bool static_ = false;
          bool unspecSize = true;
          bool varLen = false;
          std::size_t size = 0;
 
-         // array-declarator
          static_ = parseOpt(TK::STATIC);
 
          // todo: (jr) type-qualifier-list only for non abstract declarator
@@ -696,7 +756,7 @@ typename Parser<_EmitterT>::Declarator Parser<_EmitterT>::parseDeclaratorImpl() 
             // todo: assignment-expression opt
             // todo: static requires assignment-expression
             if (pos_->getKind() != TK::R_BRACKET) {
-               auto expr = parseExpr(14);
+               // todo: auto expr = parseExpr(parent, 14);
                // todo: assert(expr->ty == TY{TYK::INT} && "array size must be integer");
                size = 3; // todo: expr->token.template getValue<int>();
                unspecSize = false;
@@ -725,13 +785,13 @@ typename Parser<_EmitterT>::Declarator Parser<_EmitterT>::parseDeclaratorImpl() 
             expect(TK::ELLIPSIS);
             varargs = true;
          }
+         expect(TK::R_BRACE);
 
          TY fnTy{TY::function({}, params, varargs)};
          rhsBase.chain(fnTy);
          if (!rhsTy) {
             rhsTy = fnTy;
          }
-         expect(TK::R_BRACE);
       }
       parseOptAttributeSpecifierSequence();
    }
@@ -796,7 +856,7 @@ Parser<_EmitterT>::TY Parser<_EmitterT>::parseDeclarationSpecifierList(bool stor
          tycount[type]++;
          continue;
       }
-      std::vector<TY> members;
+      std::vector<TaggedTY> members;
       switch (type) {
          case TK::STRUCT:
          case TK::UNION:
@@ -814,7 +874,7 @@ Parser<_EmitterT>::TY Parser<_EmitterT>::parseDeclarationSpecifierList(bool stor
                   TY memberTy = parseSpecifierQualifierList();
                   // member-declarator-listop
                   // parseMemberDeclaratorList();
-                  members.push_back(memberTy);
+                  // todo: members.push_back(memberTy);
                   expect(TK::SEMICOLON);
                } while (pos_->getKind() != TK::R_C_BRKT && pos_->getKind() != TK::END);
             } else if (!ident) {

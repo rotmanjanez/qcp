@@ -104,9 +104,10 @@ TEST_P(ValidSpecifierQualifierList, parse) {
 TEST_P(ValidTypeNames, parse) {
    auto [tyStr, expectedTy] = GetParam();
    qcp::DiagnosticTracker diag{tyStr};
-   Parser parser{tyStr, diag};
+   Parser parser{tyStr, diag, devNull};
    TY parsedTy = parser.parseTypeName();
    EXPECT_EQ(parsedTy, expectedTy);
+   EXPECT_TRUE(diag.empty());
 }
 // ---------------------------------------------------------------------------
 INSTANTIATE_TEST_CASE_P(Types, ValidSpecifierQualifierList, ::testing::ValuesIn(validSpecifierQualifierList));

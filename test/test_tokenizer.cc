@@ -266,7 +266,7 @@ TEST_P(TokenMap, GetsRecognized) {
          qcp::DiagnosticTracker diagnostics{src};
          qcp::Tokenizer ts{src, diagnostics};
          auto it = ts.begin();
-         ASSERT_EQ(it->getType(), token) << "Input string: " << std::quoted(src);
+         ASSERT_EQ(it->getKind(), token) << "Input string: " << std::quoted(src);
          ASSERT_EQ(++it, ts.end()) << "Input string: " << std::quoted(src);
       }
    }
@@ -283,7 +283,7 @@ TEST_P(IdentTK, GetsRecognized) {
          qcp::DiagnosticTracker diagnostics{src};
          qcp::Tokenizer ts{src, diagnostics};
          auto it = ts.begin();
-         ASSERT_EQ(it->getType(), tk::IDENT) << "Input string: " << std::quoted(src);
+         ASSERT_EQ(it->getKind(), tk::IDENT) << "Input string: " << std::quoted(src);
          ASSERT_EQ(++it, ts.end()) << "Input string: " << std::quoted(src);
       }
    }
@@ -306,7 +306,7 @@ void test_iconst(const std::string& word, const std::vector<std::string>& suffix
             qcp::DiagnosticTracker diagnostics{src};
             qcp::Tokenizer ts{src, diagnostics};
             auto it = ts.begin();
-            ASSERT_EQ(it->getType(), type) << "Input string: " << std::quoted(src);
+            ASSERT_EQ(it->getKind(), type) << "Input string: " << std::quoted(src);
             ASSERT_EQ(it->getValue<T>(), value) << "Input string: " << std::quoted(src);
             ASSERT_EQ(++it, ts.end()) << "Input string: " << std::quoted(src);
          }
@@ -343,7 +343,7 @@ TEST_P(StringLiteralTK, GetsRecognized) {
          qcp::DiagnosticTracker diagnostics{src};
          qcp::Tokenizer ts{src, diagnostics};
          auto it = ts.begin();
-         ASSERT_EQ(it->getType(), tk::SLITERAL);
+         ASSERT_EQ(it->getKind(), tk::SLITERAL);
          ASSERT_EQ(it->getValue<std::string_view>(), word.substr(1, word.size() - 2));
          ASSERT_EQ(++it, ts.end());
       }
@@ -380,9 +380,9 @@ INSTANTIATE_TEST_CASE_P(StringLiteral, StringLiteralTK, ::testing::ValuesIn(stri
 //    std::ofstream ofs{"out.log"};
 //    std::cout << "Random test started" << std::endl;
 //    for (auto token : ts) {
-//       ASSERT_TRUE(token.getType() != tk::UNKNOWN);
+//       ASSERT_TRUE(token.getKind() != tk::UNKNOWN);
 //       ofs << token << ' ';
-//       if (token.getType() == tk::SEMICOLON) {
+//       if (token.getKind() == tk::SEMICOLON) {
 //          ofs << std::endl;
 //       }
 //    }

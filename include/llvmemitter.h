@@ -40,7 +40,7 @@ class LLVMEmitter {
    static constexpr unsigned LONG_BITS = 64;
    static constexpr unsigned LONG_LONG_BITS = 64;
 
-   LLVMEmitter() : Mod{new llvm::Module("qcp", Ctx)} {}
+   LLVMEmitter() : Mod{new llvm::Module("qcp", Ctx)}, Builder{Ctx} {}
    ~LLVMEmitter() {
       Mod->print(llvm::errs(), nullptr);
       delete Mod;
@@ -56,9 +56,23 @@ class LLVMEmitter {
 
    bb_t* emitFn(fn_t* fnProto);
 
+   ssa_t* getParam(fn_t* fn, unsigned idx);
+
    bb_t* emitBB(Ident name, fn_t* fn);
 
    ssa_t* emitConst(bb_t* bb, ty_t* ty, Ident name, long value);
+
+   ssa_t* emitAlloca(bb_t* bb, ty_t* ty, Ident name);
+
+   ssa_t* emitLoad(bb_t* bb, Ident name, ty_t* ty, ssa_t* ptr);
+
+   ssa_t* emitStore(bb_t* bb, ssa_t* value, ssa_t* ptr);
+
+   ssa_t* emitJump(bb_t* bb, bb_t* target);
+
+   ssa_t* emitBranch(bb_t* bb, bb_t* trueBB, bb_t* falseBB, ssa_t* cond);
+
+   ssa_t* emitRet(bb_t* bb, ssa_t* value);
 
    phi_t* emitPhi(bb_t* bb, Ident name, ty_t* ty);
 
@@ -71,6 +85,7 @@ class LLVMEmitter {
    private:
    llvm::LLVMContext Ctx;
    llvm::Module* Mod;
+   llvm::IRBuilder<> Builder;
 };
 // ---------------------------------------------------------------------------
 } // namespace emitter

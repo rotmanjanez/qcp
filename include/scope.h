@@ -25,11 +25,11 @@ class Scope {
 
    U* find(const T& name);
 
-   U* insert(const T& name, const U& value);
+   bool insert(const T& name, const U& value);
 
    private:
    unsigned level_ = 0;
-   std::vector<unsigned> generations_{};
+   std::vector<unsigned> generations_{0};
    std::unordered_map<T, std::vector<Entry>> symbols_{};
 };
 // ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ U* Scope<T, U>::find(const T& name) {
    if (it == symbols_.end()) {
       return nullptr;
    }
-   Entry& e = &it->second.back();
+   Entry& e = it->second.back();
    if (e.generation != generations_[level_]) {
       return nullptr;
    }
@@ -49,13 +49,13 @@ U* Scope<T, U>::find(const T& name) {
 }
 // ---------------------------------------------------------------------------
 template <typename T, typename U>
-U* Scope<T, U>::insert(const T& name, const U& value) {
+bool Scope<T, U>::insert(const T& name, const U& value) {
    auto& vec = symbols_[name];
    if (vec.empty() || vec.back().generation != generations_[level_]) {
       vec.push_back({level_, generations_[level_], value});
-      return &vec.back().value;
+      return true;
    }
-   return nullptr;
+   return false;
 }
 // ---------------------------------------------------------------------------
 template <typename T, typename U>
