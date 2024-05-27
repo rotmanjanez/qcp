@@ -1,0 +1,1 @@
+double invalid_hex_double_df = 0x1.8p3df;   // Error
