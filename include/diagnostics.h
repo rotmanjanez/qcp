@@ -14,12 +14,14 @@
 // ---------------------------------------------------------------------------
 namespace qcp {
 // ---------------------------------------------------------------------------
+class DiagnosticTracker;
+// ---------------------------------------------------------------------------
 class DiagnosticMessage {
    public:
-   explicit DiagnosticMessage(std::string message) : message_{std::move(message)}, loc_{} {}
+   explicit DiagnosticMessage(const DiagnosticTracker& tracker, std::string message) : tracker_{tracker}, message_{std::move(message)}, loc_{} {}
 
    template <typename T>
-   DiagnosticMessage(T message, SrcLoc loc) : message_{std::forward<T>(message)}, loc_{loc} {}
+   DiagnosticMessage(const DiagnosticTracker& tracker, T message, SrcLoc loc) : tracker_{tracker}, message_{std::forward<T>(message)}, loc_{loc} {}
 
    friend std::ostream& operator<<(std::ostream& os, const DiagnosticMessage& diag);
 
@@ -32,6 +34,8 @@ class DiagnosticMessage {
    }
 
    private:
+   const DiagnosticTracker& tracker_;
+   std::string_view prog_;
    std::string message_;
    std::optional<SrcLoc> loc_;
 };
@@ -49,7 +53,7 @@ class DiagnosticTracker {
    }
 
    void report(const char* message) {
-      diagnostics_.emplace_back(DiagnosticMessage(message));
+      diagnostics_.emplace_back(DiagnosticMessage(*this, message));
    }
 
    bool empty() const {
@@ -69,8 +73,9 @@ class DiagnosticTracker {
    DiagnosticTracker& operator<<(std::ostream& (*pf)(std::ostream&) ) {
       pf(os_);
       if (pf == static_cast<std::ostream& (*) (std::ostream&)>(std::endl)) {
-         std::cerr << os_.str() << std::endl;
-         report(DiagnosticMessage(os_.str(), loc_));
+         DiagnosticMessage diag{*this, os_.str(), loc_};
+         report(diag);
+         std::cerr << diag << std::endl;
          os_.clear();
          loc_ = {};
       }
@@ -79,6 +84,14 @@ class DiagnosticTracker {
 
    const std::string_view getSource(const SrcLoc& loc) const {
       return prog_.substr(loc.loc, loc.len);
+   }
+
+   std::string_view getSourceLine(const SrcLoc& loc) const {
+      auto lineBegin = std::lower_bound(lineBreaks_.begin(), lineBreaks_.end(), loc.loc) - 1;
+      auto newLine = std::find(prog_.begin() + *lineBegin + 1, prog_.end(), '\n');
+      auto line = prog_.substr(*lineBegin + 1, newLine - prog_.begin() - *lineBegin);
+      // todo: use upper_bound to find the end of the line
+      return line;
    }
 
    DiagnosticTracker& operator<<(SrcLoc loc) {

@@ -1,4 +1,5 @@
 // Alexis hates iostream
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -22,28 +23,20 @@
 
 // identifiert_start, punctuator_start, ' or "
 // ---------------------------------------------------------------------------
+using Parser = qcp::Parser<qcp::emitter::LLVMEmitter>;
+// ---------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
-   if (argc > 1) {
-      std::cout << "Usage: " << argv[0] << std::endl;
-      std::cout << "Reads code from stdin and tokenizes it." << std::endl;
-      return 1;
-   }
+   std::ifstream file(argv[1]);
+   std::string code((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
-   std::string code;
-   std::string line;
-   while (std::getline(std::cin, line)) {
-      code += line + '\n';
-   }
+   // print code
+   std::cout << code << std::endl;
 
+   // Call your parser
    qcp::DiagnosticTracker diag{code};
-   qcp::Tokenizer ts{code, diag};
-   for (const auto& token : ts) {
-      std::cout << token << '\n';
-   }
-
-   qcp::Parser<qcp::emitter::LLVMEmitter> parser{code, diag};
-
+   Parser parser{code, diag};
    parser.parse();
+   parser.getEmitter().dumpToStdout();
 
    if (!diag.empty()) {
       std::cout << diag << std::endl;

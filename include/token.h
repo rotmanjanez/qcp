@@ -61,7 +61,7 @@ enum Kind {
    // todo: ##
 
    // storage class specifier except for typedef
-   AUTO, CONSTEXPR, EXTERN, REGISTER, STATIC, THREAD_LOCAL,
+   AUTO, CONSTEXPR, EXTERN, REGISTER, STATIC, THREAD_LOCAL, TYPEDEF,
 
    // function specifier
    INLINE, NORETURN,
@@ -79,7 +79,7 @@ enum Kind {
    DECIMAL32, DECIMAL64, DECIMAL128,
 
    STRUCT, UNION, ENUM,
-   TYPEDEF, TYPEOF, TYPEOF_UNQUAL,
+   TYPEOF, TYPEOF_UNQUAL,
 
    CONST, RESTRICT, VOLATILE, ATOMIC,
    ALIGNAS,
@@ -123,21 +123,22 @@ class Token {
    public:
    Token() : type{Kind::UNKNOWN} {}
 
-   explicit Token(float value) : type{Kind::FCONST}, value{value} {}
-   explicit Token(double value) : type{Kind::DCONST}, value{value} {}
-   explicit Token(long double value) : type{Kind::LDCONST}, value{value} {}
+   Token(SrcLoc loc, float value) : type{Kind::FCONST}, value{value}, loc_{loc} {}
+   Token(SrcLoc loc, double value) : type{Kind::DCONST}, value{value}, loc_{loc} {}
+   Token(SrcLoc loc, long double value) : type{Kind::LDCONST}, value{value}, loc_{loc} {}
 
-   explicit Token(unsigned long long value) : type{Kind::ULL_ICONST}, value{value} {}
-   explicit Token(unsigned long value) : type{Kind::UL_ICONST}, value{value} {}
-   explicit Token(unsigned value) : type{Kind::U_ICONST}, value{value} {}
-   explicit Token(long long value) : type{Kind::LL_ICONST}, value{value} {}
-   explicit Token(long value) : type{Kind::L_ICONST}, value{value} {}
-   explicit Token(int value) : type{Kind::ICONST}, value{value} {}
+   Token(SrcLoc loc, unsigned long long value) : type{Kind::ULL_ICONST}, value{value}, loc_{loc} {}
+   Token(SrcLoc loc, unsigned long value) : type{Kind::UL_ICONST}, value{value}, loc_{loc} {}
+   Token(SrcLoc loc, unsigned value) : type{Kind::U_ICONST}, value{value}, loc_{loc} {}
+   Token(SrcLoc loc, long long value) : type{Kind::LL_ICONST}, value{value}, loc_{loc} {}
+   Token(SrcLoc loc, long value) : type{Kind::L_ICONST}, value{value}, loc_{loc} {}
+   Token(SrcLoc loc, int value) : type{Kind::ICONST}, value{value}, loc_{loc} {}
 
-   explicit Token(std::string_view value, Kind type = Kind::IDENT) : type{type}, ident{value} {}
+   Token(SrcLoc loc, std::string_view value, Kind type = Kind::IDENT) : type{type}, ident{value}, loc_{loc} {}
 
-   explicit Token(Kind type) : type{type} {}
-   explicit Token(const GPerfToken& gperfToken) : type{static_cast<Kind>(gperfToken.tokenType)} {}
+   explicit Token(Kind type) : type{type}, loc_{} {}
+   Token(SrcLoc loc, Kind type) : type{type}, loc_{loc} {}
+   Token(SrcLoc loc, const GPerfToken& gperfToken) : type{static_cast<Kind>(gperfToken.tokenType)}, loc_{loc} {}
 
    Kind getKind() const {
       return type;

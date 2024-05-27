@@ -39,8 +39,8 @@ class Tokenizer {
 
       private:
       public:
-      explicit const_iterator() : token_{TK::END}, prog_{}, diagnostics_{nullptr} {}
-      explicit const_iterator(const std::string_view prog_, DiagnosticTracker& diagnistics) : token_{TK::UNKNOWN}, prog_{prog_}, diagnostics_{&diagnistics} {
+      explicit const_iterator() : token_{TK::END}, prog_{}, progBegin_{prog_.begin()}, diagnostics_{nullptr} {}
+      explicit const_iterator(const std::string_view prog_, DiagnosticTracker& diagnistics) : token_{TK::UNKNOWN}, prog_{prog_}, progBegin_{prog_.begin()}, diagnostics_{&diagnistics} {
          ++(*this);
       }
 
@@ -77,6 +77,7 @@ class Tokenizer {
 
       Token token_;
       std::string_view prog_;
+      sv_it progBegin_;
       DiagnosticTracker* diagnostics_;
    };
 
@@ -423,30 +424,31 @@ sv_it Tokenizer::const_iterator::getNumberConst(sv_it begin) {
    errno = 0;
    char* pos;
 
+   SrcLoc loc{progBegin_, begin, suffixEnd};
    if (isFloat) {
       double value = std::strtod(valueRepr.c_str(), &pos);
       if (floatSuffix) {
-         token_ = Tokenizer::Token{safe_cast<float>(value)};
+         token_ = Tokenizer::Token{loc, safe_cast<float>(value)};
       } else {
-         token_ = Tokenizer::Token{value};
+         token_ = Tokenizer::Token{loc, value};
       }
    } else if (unsignedSuffix) {
       unsigned long long value = std::strtoull(valueRepr.c_str(), &pos, base);
       if (longLongSuffix) {
-         token_ = Tokenizer::Token{value};
+         token_ = Tokenizer::Token{loc, value};
       } else if (longSuffix) {
-         token_ = Tokenizer::Token{safe_cast<unsigned long>(value)};
+         token_ = Tokenizer::Token{loc, safe_cast<unsigned long>(value)};
       } else {
-         token_ = Tokenizer::Token{safe_cast<unsigned>(value)};
+         token_ = Tokenizer::Token{loc, safe_cast<unsigned>(value)};
       }
    } else {
       long long value = static_cast<long long>(std::strtoull(valueRepr.c_str(), &pos, base));
       if (longLongSuffix) {
-         token_ = Tokenizer::Token{safe_cast<long long>(value)};
+         token_ = Tokenizer::Token{loc, safe_cast<long long>(value)};
       } else if (longSuffix) {
-         token_ = Tokenizer::Token{safe_cast<long>(value)};
+         token_ = Tokenizer::Token{loc, safe_cast<long>(value)};
       } else {
-         token_ = Tokenizer::Token{safe_cast<int>(value)};
+         token_ = Tokenizer::Token{loc, safe_cast<int>(value)};
       }
    }
 
@@ -700,32 +702,42 @@ sv_it Tokenizer::const_iterator::getPunctuator(sv_it begin) {
          type = TK::UNKNOWN;
          *diagnostics_ << "unknown punctuator '" << chars[0] << '\'' << std::endl;
    }
-   token_ = Token{type};
+
+   SrcLoc loc{progBegin_, begin, begin + len};
+   token_ = Token{loc, type};
    return begin + len;
 }
 // ---------------------------------------------------------------------------
 sv_it Tokenizer::const_iterator::getSCharSequence(sv_it begin) {
-   sv_it cSeqEnd = getCharSequence<'"'>(begin, prog_.end(), *diagnostics_);
-   token_ = Token{std::string_view{begin + 1, cSeqEnd - 1}, TK::SLITERAL};
-   return cSeqEnd;
+   sv_it sSeqEnd = getCharSequence<'"'>(begin, prog_.end(), *diagnostics_);
+   token_ = Token{SrcLoc(progBegin_, begin, sSeqEnd), std::string_view{begin + 1, sSeqEnd - 1}, TK::SLITERAL};
+   return sSeqEnd;
 }
 // ---------------------------------------------------------------------------
 sv_it Tokenizer::const_iterator::getCCharSequence(sv_it begin) {
    sv_it cSeqEnd = getCharSequence<'\''>(begin, prog_.end(), *diagnostics_);
-   token_ = Token{std::string_view{begin + 1, cSeqEnd - 1}, TK::CLITERAL};
+   token_ = Token{SrcLoc(progBegin_, begin, cSeqEnd), std::string_view{begin + 1, cSeqEnd - 1}, TK::CLITERAL};
    return cSeqEnd;
 }
 // ---------------------------------------------------------------------------
 Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
    if (prog_.empty()) {
-      token_ = Token{TK::END};
+      token_ = Token(TK::END);
       return *this;
    }
 
    // find begin of next word
-   auto begin = std::find_if(prog_.begin(), prog_.end(), [](char c) { return isPunctuatorStart(c) or isIdentStart(c) or isDigit(c) or c == '"' or c == '\''; });
+   decltype(prog_)::const_iterator begin = prog_.begin();
+find_token_start:
+   begin = std::find_if(begin, prog_.end(), [](char c) { return isPunctuatorStart(c) or isIdentStart(c) or isDigit(c) or c == '"' or c == '\'' or c == '\n'; });
+   if (begin != prog_.end() && *begin == '\n') {
+      diagnostics_->registerLineBreak(std::distance(progBegin_, begin));
+      ++begin;
+      goto find_token_start;
+   }
+
    if (begin == prog_.end()) {
-      token_ = Token{TK::END};
+      token_ = Token(TK::END);
       return *this;
    }
    prog_ = prog_.substr(std::distance(prog_.begin(), begin));
@@ -735,9 +747,26 @@ Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
    bool requiresSeparator = false;
    sv_it end;
 
-   *diagnostics_ << SrcLoc{static_cast<std::size_t>(std::distance(prog_.begin(), begin)), 1u};
-
    if (isPunctuatorStart(*begin) && !(*begin == '.' and isDigit(second))) {
+      // todo: this should be preprocessor?
+      if (*begin == '/' && second == '/') {
+         end = std::find_if(begin + 2, prog_.end(), [](char c) { return c == '\n'; });
+         diagnostics_->registerLineBreak(std::distance(prog_.begin() + 1, end));
+         prog_ = prog_.substr(std::distance(prog_.begin(), end));
+         begin = prog_.begin();
+         goto find_token_start;
+      } else if (*begin == '/' && second == '*') {
+         const char* commentEnd = "*/";
+         end = std::search(begin + 1, prog_.end(), commentEnd, commentEnd + 2);
+         if (end == prog_.end()) {
+            *diagnostics_ << SrcLoc(progBegin_, begin, end) << "unterminated comment" << std::endl;
+         }
+         prog_ = prog_.substr(std::distance(prog_.begin(), end + 2));
+         begin = prog_.begin();
+         goto find_token_start;
+      } else {
+         end = getPunctuator(begin);
+      }
       end = getPunctuator(begin);
    } else if (isIdentStart(*begin)) {
       requiresSeparator = true;
@@ -746,10 +775,11 @@ Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
       std::string_view ident{begin, end};
       const token::GPerfToken* t = token::ReservedKeywordHash::isInWordSet(ident.data(), ident.size());
       // todo: (jr) handle constants
+      SrcLoc loc{progBegin_, begin, end};
       if (t) {
-         token_ = Token{*t};
+         token_ = Token{loc, *t};
       } else {
-         token_ = Token{ident};
+         token_ = Token{loc, ident};
       }
    } else if (isDigit(*begin) or (*begin == '.' and isDigit(second))) {
       requiresSeparator = true;
@@ -761,8 +791,6 @@ Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
    } else {
       *diagnostics_ << "unknown token: '" << *begin << '\'' << std::endl;
    }
-
-   *diagnostics_ << SrcLoc{static_cast<std::size_t>(std::distance(prog_.begin(), begin)), static_cast<unsigned>(std::distance(begin, end))};
 
    prog_ = prog_.substr(std::distance(prog_.begin(), end));
 
