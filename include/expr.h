@@ -27,103 +27,93 @@ class Expr {
 
    using ssa_t = typename _EmitterT::ssa_t;
    using bb_t = typename _EmitterT::bb_t;
+   using fn_t = typename _EmitterT::fn_t;
 
-   using Scope = Scope<Ident, std::pair<TY, ssa_t*>>;
+   using ScopeInfo = ScopeInfo<_EmitterT>;
+   using Scope = Scope<Ident, ScopeInfo>;
 
-   Expr(bb_t* bb, Ident i) : op{},
-                             opspec{0, 0},
-                             mayBeLval{true},
-                             ident{i} {
-      auto& [iTy, iSSA] = *(scope().find(i));
-      ty = iTy;
-      ssa_ = iSSA;
-   }
+   Expr(SrcLoc loc, TY& ty, Ident i, ssa_t* ssa) : op{},
+                                                   opspec{0, 0},
+                                                   mayBeLval_{true},
+                                                   ty{ty},
+                                                   loc{loc},
+                                                   ident{i},
+                                                   ssa{ssa} {}
+
+   Expr(SrcLoc loc, TY& ty, ssa_t* ssa, bool isConstExpr) : op{},
+                                                            opspec{0, 0},
+                                                            isConstExpr{isConstExpr},
+                                                            ty{ty},
+                                                            loc{loc},
+                                                            ssa{ssa} {}
 
    ~Expr() {
       std::cout << *this << std::endl;
    }
 
-   Expr(bb_t* bb, OpKind op, const TY& ty, std::unique_ptr<Expr>&& lhs) : op{op},
-                                                                          opspec{getOpSpec(op)},
-                                                                          ty{ty},
-                                                                          lhs_{std::move(lhs)},
-                                                                          rhs_{} {}
+   Expr(OpKind op, const TY& ty, std::unique_ptr<Expr>&& lhs, ssa_t* ssa, Ident name = Ident()) : op{op},
+                                                                                                  opspec{getOpSpec(op)},
+                                                                                                  ty{ty},
+                                                                                                  loc{lhs->loc},
+                                                                                                  ident{name},
+                                                                                                  lhs_{std::move(lhs)},
+                                                                                                  rhs_{},
+                                                                                                  ssa{ssa} {
+      if (lhs_->isConstExpr) {
+         switch (op) {
+            case OpKind::PREINC:
+            case OpKind::PREDEC:
+            case OpKind::POSTINC:
+            case OpKind::POSTDEC:
+            case OpKind::CALL:
+               break;
+            default:
+               isConstExpr = true;
+         }
+      }
+   }
 
-   Expr(bb_t* bb, OpKind op, std::unique_ptr<Expr>&& lhs) : op{op},
-                                                            opspec{getOpSpec(op)},
-                                                            ty{lhs->ty},
-                                                            lhs_{std::move(lhs)},
-                                                            rhs_{},
-                                                            ssa_{emitter().emitUnOp(bb, Ident(), op, lhs_->ssa(bb))} {}
-
-   Expr(bb_t* bb, OpKind op, std::unique_ptr<Expr>&& lhs, std::unique_ptr<Expr> rhs) : op{op},
-                                                                                       opspec{getOpSpec(op)},
-                                                                                       ty{TY::commonRealType(op, lhs->ty, rhs->ty)},
-                                                                                       lhs_{std::move(lhs)},
-                                                                                       rhs_{std::move(rhs)},
-                                                                                       ssa_{emitter().emitBinOp(bb, Ident(), op, lhs_->ssa(bb), rhs_->ssa(bb))} {}
-
-   // todo: (jr) tokens can also be identifier and not only constants
-   Expr(bb_t* bb, const Token& token, bool isConstExpr = false) : opspec{0, false},
-                                                                  ty{TY::fromToken(token)},
-                                                                  lhs_{},
-                                                                  rhs_{},
-                                                                  ssa_{emitter().emitConst(bb, ty.emitterType(), Ident(), token.getValue<int>())} {}
+   Expr(OpKind op, const TY& ty, std::unique_ptr<Expr>&& lhs, std::unique_ptr<Expr> rhs, ssa_t* ssa, Ident name = Ident()) : op{op},
+                                                                                                                             opspec{getOpSpec(op)},
+                                                                                                                             ty{ty},
+                                                                                                                             loc{lhs->loc | rhs->loc},
+                                                                                                                             ident{name},
+                                                                                                                             lhs_{std::move(lhs)},
+                                                                                                                             rhs_{std::move(rhs)},
+                                                                                                                             ssa{ssa} {
+      if (lhs_->isConstExpr && rhs_->isConstExpr && !((op >= OpKind::ASSIGN && op <= OpKind::COMMA))) {
+         isConstExpr = true;
+      }
+   }
 
    void setPrec(int8_t prec) {
       opspec.precedence = prec;
    }
 
-   ssa_t* ssa(bb_t* bb) {
-      if (mayBeLval) {
-         return emitter().emitLoad(bb, ident, ty.emitterType(), ssa_);
-      }
-      return ssa_;
-   }
-
-   static void setEmitter(_EmitterT& emitter) {
-      emitter_ = &emitter;
-   }
-
-   static void setScope(Scope& scope) {
-      scope_ = &scope;
+   bool mayBeLval() const {
+      return mayBeLval_;
    }
 
    private:
-   static _EmitterT* emitter_;
-   static Scope* scope_;
-
    OpKind op;
    OpSpec opspec;
    bool isConstExpr = false;
-   bool mayBeLval = false;
+   bool mayBeLval_ = false;
 
+   public:
    TY ty;
+   const SrcLoc loc;
 
-   // todo: remove this
+   // todo: remove this?
    Ident ident;
 
+   private:
    std::unique_ptr<Expr> lhs_;
    std::unique_ptr<Expr> rhs_;
 
-   ssa_t* ssa_ = nullptr;
-
-   _EmitterT& emitter() {
-      assert(emitter_ && "Emitter not set");
-      return *emitter_;
-   }
-
-   Scope& scope() {
-      assert(scope_ && "Scope not set");
-      return *scope_;
-   }
+   public:
+   ssa_t* ssa = nullptr;
 };
-// ---------------------------------------------------------------------------
-template <typename _EmitterT>
-_EmitterT* Expr<_EmitterT>::emitter_ = nullptr;
-// ---------------------------------------------------------------------------
-template <typename _EmitterT>
-typename Expr<_EmitterT>::Scope* Expr<_EmitterT>::scope_ = nullptr;
 // ---------------------------------------------------------------------------
 template <typename T>
 void dump(std::ostream& os, const Expr<T>& expr, int indent = 0) {
