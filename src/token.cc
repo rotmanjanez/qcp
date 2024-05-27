@@ -58,7 +58,7 @@ std::ostream& operator<<(std::ostream& os, const Kind& tt) {
       "SEMICOLON",
       "ELLIPSIS",
        
-      "AUTO", "CONSTEXPR", "EXTERN", "REGISTER", "STATIC", "THREAD_LOCAL",
+      "AUTO", "CONSTEXPR", "EXTERN", "REGISTER", "STATIC", "THREAD_LOCAL", "TYPEDEF",
 
       "INLINE", "NORETURN",
 
@@ -73,7 +73,7 @@ std::ostream& operator<<(std::ostream& os, const Kind& tt) {
       "DECIMAL32", "DECIMAL64", "DECIMAL128",
 
       "STRUCT", "UNION", "ENUM",
-      "TYPEDEF", "TYPEOF", "TYPEOF_UNQUAL",
+      "TYPEOF", "TYPEOF_UNQUAL",
 
       "CONST", "RESTRICT", "VOLATILE", "ATOMIC",
       "ALIGNAS",
