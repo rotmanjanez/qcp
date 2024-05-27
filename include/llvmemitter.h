@@ -11,6 +11,8 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 // ---------------------------------------------------------------------------
+#include <iostream>
+// ---------------------------------------------------------------------------
 namespace qcp {
 // ---------------------------------------------------------------------------
 namespace op {
@@ -29,6 +31,7 @@ namespace emitter {
 class LLVMEmitter {
    public:
    using ssa_t = llvm::Value;
+   using const_t = llvm::Constant;
    using phi_t = llvm::PHINode;
    using bb_t = llvm::BasicBlock;
    using ty_t = llvm::Type;
@@ -42,8 +45,17 @@ class LLVMEmitter {
 
    LLVMEmitter() : Mod{new llvm::Module("qcp", Ctx)}, Builder{Ctx} {}
    ~LLVMEmitter() {
-      Mod->print(llvm::errs(), nullptr);
       delete Mod;
+   }
+
+   void dumpToFile(const std::string& filename) {
+      std::error_code EC;
+      llvm::raw_fd_ostream OS(filename, EC);
+      Mod->print(OS, nullptr);
+   }
+
+   void dumpToStdout() {
+      Mod->print(llvm::outs(), nullptr);
    }
 
    ty_t* emitPtrTo(ty_t* ty);
@@ -52,15 +64,23 @@ class LLVMEmitter {
 
    ty_t* emitFnTy(ty_t* retTy, std::vector<ty_t*> argTys);
 
+   ssa_t* emitGlobalVar(ty_t* ty, Ident name, const_t* init);
+
+   void setInitValueGlobalVar(ssa_t* val, const_t* init);
+
    fn_t* emitFnProto(Ident name, ty_t* fnTy);
 
    bb_t* emitFn(fn_t* fnProto);
+
+   bool isFnProto(fn_t* fn);
 
    ssa_t* getParam(fn_t* fn, unsigned idx);
 
    bb_t* emitBB(Ident name, fn_t* fn);
 
    ssa_t* emitConst(bb_t* bb, ty_t* ty, Ident name, long value);
+
+   ssa_t* emitLocalVar(fn_t* fn, bb_t* bb, ty_t* ty, Ident name, ssa_t* init);
 
    ssa_t* emitAlloca(bb_t* bb, ty_t* ty, Ident name);
 
@@ -81,6 +101,8 @@ class LLVMEmitter {
    ssa_t* emitBinOp(bb_t* bb, Ident name, op::Kind kind, ssa_t* lhs, ssa_t* rhs);
 
    ssa_t* emitUnOp(bb_t* bb, Ident name, op::Kind kind, ssa_t* operand);
+
+   ssa_t* emitCall(bb_t* bb, Ident name, fn_t* fn, const std::vector<ssa_t*>& args);
 
    private:
    llvm::LLVMContext Ctx;

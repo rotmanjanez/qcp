@@ -88,12 +88,24 @@ typename LLVMEmitter::ty_t* LLVMEmitter::emitFnTy(ty_t* retTy, std::vector<ty_t*
    return llvm::FunctionType::get(retTy, argTys, false);
 }
 // ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitGlobalVar(ty_t* ty, Ident name, const_t* init) {
+   return new llvm::GlobalVariable(*Mod, ty, false, llvm::GlobalValue::ExternalLinkage, init, static_cast<std::string>(name).c_str());
+}
+// ---------------------------------------------------------------------------
+void LLVMEmitter::setInitValueGlobalVar(ssa_t* val, const_t* init) {
+   static_cast<llvm::GlobalVariable*>(val)->setInitializer(init);
+}
+// ---------------------------------------------------------------------------
 typename LLVMEmitter::fn_t* LLVMEmitter::emitFnProto(Ident name, ty_t* fnTy) {
    return llvm::Function::Create(static_cast<llvm::FunctionType*>(fnTy), llvm::Function::ExternalLinkage, static_cast<std::string>(name).c_str(), Mod);
 }
 // ---------------------------------------------------------------------------
 typename LLVMEmitter::bb_t* LLVMEmitter::emitFn(fn_t* fnProto) {
    return llvm::BasicBlock::Create(Ctx, "entry", fnProto);
+}
+// ---------------------------------------------------------------------------
+bool LLVMEmitter::isFnProto(fn_t* fn) {
+   return fn->isDeclaration();
 }
 // ---------------------------------------------------------------------------
 typename LLVMEmitter::ssa_t* LLVMEmitter::getParam(fn_t* fn, unsigned idx) {
@@ -104,8 +116,17 @@ typename LLVMEmitter::bb_t* LLVMEmitter::emitBB(Ident name, fn_t* fn) {
    return llvm::BasicBlock::Create(Ctx, static_cast<std::string>(name).c_str(), fn);
 }
 // ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitLocalVar(fn_t* fn, bb_t* bb, ty_t* ty, Ident name, ssa_t* init) {
+   bb_t* entry = &fn->getEntryBlock();
+   ssa_t* alloca = emitAlloca(entry, ty, name);
+   if (init) {
+      emitStore(entry, init, alloca);
+   }
+   return alloca;
+}
+// ---------------------------------------------------------------------------
 typename LLVMEmitter::ssa_t* LLVMEmitter::emitAlloca(bb_t* bb, ty_t* ty, Ident name) {
-   Builder.SetInsertPoint(bb);
+   Builder.SetInsertPoint(bb, bb->begin());
    return Builder.CreateAlloca(ty, nullptr, static_cast<std::string>(name).c_str());
 }
 // ---------------------------------------------------------------------------
@@ -165,6 +186,10 @@ typename LLVMEmitter::ssa_t* LLVMEmitter::emitUnOp(bb_t* bb, Ident name, op::Kin
       return postInc ? operand : result;
    }
    assert(false && "not implemented");
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitCall(bb_t* bb, Ident name, fn_t* fn, const std::vector<ssa_t*>& args) {
+   return llvm::CallInst::Create(fn, args, static_cast<std::string>(name).c_str(), bb);
 }
 // ---------------------------------------------------------------------------
 } // namespace emitter
