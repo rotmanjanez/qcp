@@ -20,6 +20,9 @@ enum class Kind; // forward declaration
 } // namespace op
 // ---------------------------------------------------------------------------
 namespace type {
+// ---------------------------------------------------------------------------
+enum class Cast; // forward declaration
+// ---------------------------------------------------------------------------
 template <typename _EmitterT>
 class Type; // forward declaration
 } // namespace type
@@ -37,16 +40,14 @@ class LLVMEmitter {
    using ty_t = llvm::Type;
    using fn_t = llvm::Function;
 
-   static constexpr unsigned CHAR_BITS = 8;
-   static constexpr unsigned SHORT_BITS = 16;
-   static constexpr unsigned INT_BITS = 32;
-   static constexpr unsigned LONG_BITS = 64;
-   static constexpr unsigned LONG_LONG_BITS = 64;
+   // containes a backref to the type with emitterType() method
+   // todo: make const
+   using TY = type::Type<LLVMEmitter>;
+
+   static constexpr bool LONG_HAS_64_BIT = true;
 
    LLVMEmitter() : Mod{new llvm::Module("qcp", Ctx)}, Builder{Ctx} {}
-   ~LLVMEmitter() {
-      delete Mod;
-   }
+   ~LLVMEmitter() { delete Mod; }
 
    void dumpToFile(const std::string& filename) {
       std::error_code EC;
@@ -58,17 +59,29 @@ class LLVMEmitter {
       Mod->print(llvm::outs(), nullptr);
    }
 
-   ty_t* emitPtrTo(ty_t* ty);
+   ty_t* emitVoidTy();
 
    ty_t* emitIntTy(unsigned bits);
 
-   ty_t* emitFnTy(ty_t* retTy, std::vector<ty_t*> argTys);
+   ty_t* emitFloatTy();
 
-   ssa_t* emitGlobalVar(ty_t* ty, Ident name, const_t* init);
+   ty_t* emitDoubleTy();
+
+   ty_t* emitPtrTo(TY ty);
+
+   ty_t* emitArrayTy(TY ty, std::size_t size);
+
+   ssa_t* emitUndef();
+
+   ssa_t* emitPoison();
+
+   ty_t* emitFnTy(TY retTy, std::vector<TY> argTys, bool isVarArg);
+
+   ssa_t* emitGlobalVar(TY ty, Ident name);
 
    void setInitValueGlobalVar(ssa_t* val, const_t* init);
 
-   fn_t* emitFnProto(Ident name, ty_t* fnTy);
+   fn_t* emitFnProto(Ident name, TY fnTy);
 
    bb_t* emitFn(fn_t* fnProto);
 
@@ -76,15 +89,17 @@ class LLVMEmitter {
 
    ssa_t* getParam(fn_t* fn, unsigned idx);
 
-   bb_t* emitBB(Ident name, fn_t* fn);
+   bb_t* emitBB(Ident name, fn_t* fn, bb_t* insertBefore = nullptr);
 
-   ssa_t* emitConst(bb_t* bb, ty_t* ty, Ident name, long value);
+   const_t* emitConst(TY ty, Ident name, long value);
 
-   ssa_t* emitLocalVar(fn_t* fn, bb_t* bb, ty_t* ty, Ident name, ssa_t* init);
+   ssa_t* emitLocalVar(fn_t* fn, bb_t* bb, TY ty, Ident name, ssa_t* init = nullptr);
 
-   ssa_t* emitAlloca(bb_t* bb, ty_t* ty, Ident name);
+   void setInitValueLocalVar(fn_t* fn, ssa_t* val, ssa_t* value);
 
-   ssa_t* emitLoad(bb_t* bb, Ident name, ty_t* ty, ssa_t* ptr);
+   ssa_t* emitAlloca(bb_t* bb, TY ty, Ident name);
+
+   ssa_t* emitLoad(bb_t* bb, Ident name, TY ty, ssa_t* ptr);
 
    ssa_t* emitStore(bb_t* bb, ssa_t* value, ssa_t* ptr);
 
@@ -94,15 +109,19 @@ class LLVMEmitter {
 
    ssa_t* emitRet(bb_t* bb, ssa_t* value);
 
-   phi_t* emitPhi(bb_t* bb, Ident name, ty_t* ty);
+   phi_t* emitPhi(bb_t* bb, Ident name, TY ty);
 
    void addIncoming(Ident name, phi_t* phi, ssa_t* value, bb_t* bb);
 
-   ssa_t* emitBinOp(bb_t* bb, Ident name, op::Kind kind, ssa_t* lhs, ssa_t* rhs);
+   ssa_t* emitBinOp(bb_t* bb, TY ty, Ident name, op::Kind kind, ssa_t* lhs, ssa_t* rhs, ssa_t* dest = nullptr);
 
-   ssa_t* emitUnOp(bb_t* bb, Ident name, op::Kind kind, ssa_t* operand);
+   ssa_t* emitUnOp(bb_t* bb, TY ty, Ident name, op::Kind kind, ssa_t* operand);
+
+   ssa_t* emitCast(bb_t* bb, ssa_t* val, TY toTy, qcp::type::Cast cast);
 
    ssa_t* emitCall(bb_t* bb, Ident name, fn_t* fn, const std::vector<ssa_t*>& args);
+
+   ssa_t* emitCall(bb_t* bb, Ident name, TY fnTy, ssa_t* fnPtr, const std::vector<ssa_t*>& args);
 
    private:
    llvm::LLVMContext Ctx;
