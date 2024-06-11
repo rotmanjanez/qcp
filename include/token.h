@@ -15,78 +15,9 @@
 namespace qcp {
 namespace token {
 // ---------------------------------------------------------------------------
-// clang-format off
 enum Kind {
-   // tokens in operator precedence order (as complete as possible) starting from the arethmetic operators (precedence 3)
-   ASTERISK, DIV, PERCENT,
-   PLUS, MINUS,
-   SHL, SHR,
-   L_ANGLE, LE, R_ANGLE, GE,
-   EQ, NE,
-   BW_AND, BW_XOR, BW_OR,
-   L_AND, L_OR,
-   __UNUSED__, // TERNARY CONDITIONAL MISSING
-   ASSIGN, ADD_ASSIGN, SUB_ASSIGN, MUL_ASSIGN, DIV_ASSIGN, REM_ASSIGN, SHL_ASSIGN, SHR_ASSIGN, BW_AND_ASSIGN, BW_XOR_ASSIGN, BW_OR_ASSIGN,
-   COMMA,
-   // end of operator precedence order
-
-   UNKNOWN,
-
-   IDENT,
-
-   ICONST, U_ICONST, L_ICONST, UL_ICONST, LL_ICONST, ULL_ICONST,
-   
-   FCONST, DCONST, LDCONST,
-   
-   WB_ICONST, UWB_ICONST,
-   SLITERAL, CLITERAL,
-
-   // punctuators
-   L_BRACKET, R_BRACKET, L_BRACE, R_BRACE, L_C_BRKT, R_C_BRKT,
-   PERIOD, // .
-   DEREF, // ->
-
-   INC, DEC, 
-
-   BW_INV, // ~
-   NEG, // !
-
-   QMARK, // ?
-   COLON, // :
-   D_COLON, // ::
-   SEMICOLON, // ;
-   ELLIPSIS, // ...
-
-   // todo: #
-   // todo: ##
-
-   // storage class specifier except for typedef
-   AUTO, CONSTEXPR, EXTERN, REGISTER, STATIC, THREAD_LOCAL, TYPEDEF,
-
-   // function specifier
-   INLINE, NORETURN,
-
-   // other keywords
-   SWITCH, BREAK, CASE, CONTINUE, DEFAULT, WHILE, DO, ELSE, FOR, GOTO, IF, RETURN,
-   FALSE, TRUE, NULLPTR,
-   
-   STATIC_ASSERT, SIZEOF, ALIGNOF,
-   GENERIC, IMAGINARY,
-   
-   // type specifier
-   VOID, CHAR, SHORT, INT, LONG, FLOAT, DOUBLE, SIGNED, UNSIGNED, 
-   BITINT, BOOL, COMPLEX,
-   DECIMAL32, DECIMAL64, DECIMAL128,
-
-   STRUCT, UNION, ENUM,
-   TYPEOF, TYPEOF_UNQUAL,
-
-   CONST, RESTRICT, VOLATILE, ATOMIC,
-   ALIGNAS,
-
-   END,
+#include "defs/tokens.def"
 };
-// clang-format on
 // ---------------------------------------------------------------------------
 std::ostream& operator<<(std::ostream& os, const Kind& tt);
 // ---------------------------------------------------------------------------

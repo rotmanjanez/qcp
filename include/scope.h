@@ -20,14 +20,38 @@ class Scope {
       U value;
    };
 
+   class ScopeGuard {
+      public:
+      ScopeGuard(Scope& scope) : scope_{scope} {
+         scope_.enter();
+      }
+
+      ~ScopeGuard() {
+         scope_.leave();
+      }
+
+      private:
+      Scope& scope_;
+   };
+
    public:
    void enter();
 
    void leave();
 
+   ScopeGuard guard() {
+      return ScopeGuard{*this};
+   }
+
    U* find(const T& name);
 
-   bool insert(const T& name, const U& value);
+   U* insert(const T& name, const U& value);
+
+   bool canInsert(const T& name);
+
+   bool isTopLevel() const {
+      return level_ == 0;
+   }
 
    private:
    Entry* findEntry(const T& name);
@@ -74,35 +98,32 @@ Scope<T, U>::Entry* Scope<T, U>::findEntry(const T& name) {
 }
 // ---------------------------------------------------------------------------
 template <typename T, typename U>
+bool Scope<T, U>::canInsert(const T& name) {
+   Entry* e = findEntry(name);
+   return !e || e->level < level_;
+}
+// ---------------------------------------------------------------------------
+template <typename T, typename U>
 U* Scope<T, U>::find(const T& name) {
    Entry* e = findEntry(name);
    return e ? &e->value : nullptr;
 }
 // ---------------------------------------------------------------------------
 template <typename T, typename U>
-bool Scope<T, U>::insert(const T& name, const U& value) {
+U* Scope<T, U>::insert(const T& name, const U& value) {
    auto& vec = symbols_[name];
    Entry* e = findEntry(name);
 
    if (e && e->level == level_) {
-      return false;
+      return nullptr;
    }
 
    vec.push_back({level_, generations_[level_], value});
-   std::cout << "Inserted: " << name << " (lvl: " << level_ << " gen: " << generations_[level_] << ")" << std::endl;
-   return true;
+   return &vec.back().value;
 }
 // ---------------------------------------------------------------------------
 template <typename T, typename U>
 void Scope<T, U>::enter() {
-   std::cout << "Entering scope (lvl: " << level_ << " gen: " << generations_[level_] << ")" << std::endl;
-   for (const auto& [name, vec] : symbols_) {
-      if (find(name)) {
-         std::cout << "In scope: " << name << std::endl;
-      } else {
-         // std::cout << "Not in scope: " << name << "(lvl: " << vec.back().level << " gen: " << vec.back().generation << " )" << std::endl;
-      }
-   }
    ++level_;
    if (generations_.size() <= level_) {
       generations_.push_back(0);
@@ -113,16 +134,6 @@ void Scope<T, U>::enter() {
 // ---------------------------------------------------------------------------
 template <typename T, typename U>
 void Scope<T, U>::leave() {
-   std::cout << "Leaving scope" << std::endl;
-   // list all symbols that are going out of scope
-   for (const auto& [name, vec] : symbols_) {
-      if (vec.empty()) {
-         continue;
-      }
-      if (vec.back().generation == generations_[level_]) {
-         std::cout << "Out of scope: " << name << std::endl;
-      }
-   }
    assert(level_ > 0 && "Cannot leave root scope");
    --level_;
 }
