@@ -1,0 +1,9 @@
+#ifdef ENUM_AS_STRING
+#define NAMED_ENUM_ENTRY(name, repr) repr,
+#define ENUM_ENTRY(name) #name,
+#define ENUM_END "END"
+#else
+#define NAMED_ENUM_ENTRY(name, repr) name,
+#define ENUM_ENTRY(name) name,
+#define ENUM_END END
+#endif

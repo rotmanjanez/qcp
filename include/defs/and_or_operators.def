@@ -1,0 +1,7 @@
+#include "defs/defines.def"
+
+ENUM_ENTRY(BW_AND)
+ENUM_ENTRY(BW_XOR)
+ENUM_ENTRY(BW_OR)
+ENUM_ENTRY(L_AND)
+ENUM_ENTRY(L_OR)
