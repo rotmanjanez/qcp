@@ -27,7 +27,7 @@ class Parser {
    using TYK = type::Kind;
    using TY = type::Type<_EmitterT>;
    using TaggedTY = type::TaggedType<_EmitterT>;
-   using Factory = type::BaseFactory<_EmitterT>;
+   using Factory = type::TypeFactory<_EmitterT>;
    using DeclTypeBaseRef = typename Factory::DeclTypeBaseRef;
 
    using OpSpec = op::OpSpec;
@@ -54,28 +54,64 @@ class Parser {
                                                  tracer_{logStream},
                                                  factory_{emitter_} {}
 
+   struct State {
+      fn_t* fn = nullptr;
+      bb_t* entry = nullptr;
+      bb_t* bb = nullptr;
+      TY retTy{};
+
+      std::unordered_map<Ident, bb_t*> labels{};
+      std::unordered_map<Ident, std::vector<bb_t*>> incompleteGotos{};
+      std::vector<std::pair<bb_t*, ssa_t*>> missingReturns{};
+   } state;
+
    _EmitterT& getEmitter() {
       return emitter_;
    }
 
    void parse() {
-      std::cout << std::string(80, '-') << '\n';
       tracer_ << ENTER{"parseTranslationUnit"};
       while (*pos_) {
          std::vector<attr_t> attr = parseOptAttributeSpecifierSequence();
-         State s{};
-         parseDeclStmt(s, attr, true);
+         state = State();
+         parseDeclStmt(attr);
+         for (auto& [lbl, gotos] : state.incompleteGotos) {
+            for (bb_t* bb : gotos) {
+               if (state.labels.contains(lbl)) {
+                  emitter_.emitJump(bb, state.labels[lbl]);
+               } else {
+                  diagnostics_ << "Undefined label " << lbl << std::endl;
+               }
+            }
+         }
+         if (!state.fn || !state.entry) {
+            continue;
+         }
+         // handle gotos and returns
+         if (state.missingReturns.size() == 0) {
+            if (state.retTy.kind() != TYK::VOID) {
+               diagnostics_ << "Missing return statement" << std::endl;
+            }
+            emitter_.emitRet(state.bb, nullptr);
+         } else if (state.missingReturns.size() == 1) {
+            emitter_.emitRet(state.missingReturns[0].first, state.missingReturns[0].second);
+         } else {
+            ssa_t* retVar = emitter_.emitLocalVar(state.fn, state.entry, state.retTy, Ident("__retVar"));
+            bb_t* retBB = emitter_.emitBB(Ident("__retBB"), state.fn);
+            for (auto [bb, val] : state.missingReturns) {
+               emitter_.emitStore(bb, val, retVar);
+               emitter_.emitJump(bb, retBB);
+            }
+            ssa_t* retVal = emitter_.emitLoad(retBB, Ident("__retVar"), state.retTy, retVal);
+            emitter_.emitRet(retBB, retVal);
+         }
       }
-
-      std::cout << std::string(80, '-') << '\n';
+      for (ScopeInfo* var : missingDefaultInitiations_) {
+         const_t* c = emitter_.emitConst(var->ty, Ident(), 0);
+         emitter_.setInitValueGlobalVar(var->ssa, c);
+      }
       tracer_ << EXIT{"parseTranslationUnit"};
    }
-
-   struct State {
-      fn_t* fn = nullptr;
-      bb_t* entry = nullptr;
-      bb_t* bb = nullptr;
-   };
 
    struct Declarator {
       TY ty;
@@ -89,50 +125,97 @@ class Parser {
       TY ty;
    };
 
-   State parseStmt(State s);
-   State parseCompoundStmt(State s);
-   State parseUnlabledStmt(State s, const std::vector<attr_t>& attr);
-   State parseDeclStmt(State s, const std::vector<attr_t>& attr, bool isTopLevel = false);
-   expr_t parseExpr(State s, short midPrec = 0);
-   expr_t parseAssignmentExpr(State s) {
-      return parseExpr(s, 14);
+   void parseStmt();
+   void parseCompoundStmt();
+   void parseUnlabledStmt(const std::vector<attr_t>& attr);
+   void parseDeclStmt(const std::vector<attr_t>& attr);
+   void parseFunctionDefinition(Declarator& decl);
+
+   expr_t parseExpr(short midPrec = 0);
+   expr_t parseAssignmentExpr() {
+      return parseExpr(14);
    }
-   expr_t parsePrimaryExpr(State s);
+   expr_t parsePrimaryExpr();
+
    TY parseTypeName();
    TY parseSpecifierQualifierList();
 
    DeclarationSpecifier parseDeclarationSpecifierList(bool storageClassSpecifiers = true, bool functionSpecifiers = true);
 
-   void parseFunctionDefinition(Declarator& decl, State s);
-   expr_t parseInitializerList(State s);
+   expr_t parseInitializerList();
 
    private:
+   int parseOptLabelList(std::vector<attr_t>& attr);
    void parseMemberDeclaratorList();
    std::vector<attr_t> parseOptAttributeSpecifierSequence();
 
    TY parseAbstractDeclarator(TY specifierQualifier);
+   Declarator parseDirectDeclarator(TY specifierQualifier);
    // todo: make move
    Declarator parseDeclarator(TY specifierQualifier);
    // todo: make move
    Declarator parseDeclaratorImpl();
 
-   void parseParameterList(std::vector<TY>& paramTys, std::vector<Ident>& paramNames);
+   bool parseParameterList(std::vector<TY>& paramTys, std::vector<Ident>& paramNames);
 
-   inline ssa_t* asRVal(State& s, expr_t& expr) {
+   inline ssa_t* asRVal(expr_t& expr) {
+      if (!expr->ty) {
+         return emitter_.emitPoison();
+      }
       if (expr->mayBeLval() && expr->ty.kind() != TYK::FN_T) {
-         return emitter_.emitLoad(s.bb, expr->ident, expr->ty.emitterType(), expr->ssa);
+         return emitter_.emitLoad(state.bb, expr->ident, expr->ty, expr->ssa);
       }
       return expr->ssa;
    }
 
-   inline expr_t emitUnOp(State s, Ident name, op::Kind kind, expr_t&& operand) {
+   ssa_t* cast(TY from, TY to, ssa_t* val) {
+      if (from == to) {
+         return val;
+      }
+
+      type::Cast kind;
+      if (!from) {
+         kind = type::Cast::BITCAST;
+      } else if (from.isIntegerType() && to.isIntegerType()) {
+         kind = from.isSigned() ? type::Cast::SEXT : type::Cast::ZEXT;
+      } else if (from.isIntegerType() && to.isFloatingType()) {
+         kind = from.isSigned() ? type::Cast::SITOFP : type::Cast::UITOFP;
+      } else if (from.isFloatingType() && to.isIntegerType()) {
+         kind = type::Cast::FPTOSI;
+      } else {
+         diagnostics_ << "Invalid cast from " << from << " to " << to << std::endl;
+         assert(false && "invalid cast");
+      }
+      return emitter_.emitCast(state.bb, val, to, kind);
+   }
+
+   inline ssa_t* parseConditionExpr() {
+      bb_t* cond = emitter_.emitBB(Ident("cond"), state.fn);
+      emitter_.emitJump(state.bb, cond);
+      state.bb = cond;
+      expr_t expr = parseExpr();
+      return asRVal(expr);
+   }
+
+   inline expr_t emitUnOp(Ident name, op::Kind kind, expr_t&& operand) {
       // todo: type
-      ssa_t* ssa = emitter_.emitUnOp(s.bb, name, kind, asRVal(s, operand));
+      ssa_t* opVal;
+      switch (kind) {
+         case op::Kind::PREDEC:
+         case op::Kind::PREINC:
+         case op::Kind::POSTINC:
+         case op::Kind::POSTDEC:
+            opVal = operand->ssa;
+            break;
+         default:
+            opVal = asRVal(operand);
+      }
+      ssa_t* ssa = emitter_.emitUnOp(state.bb, operand->ty, name, kind, opVal);
       return std::make_unique<Expr>(kind, operand->ty, std::move(operand), ssa, name);
    }
 
-   inline expr_t emitUnOp(State& s, op::Kind kind, expr_t&& operand) {
-      return emitUnOp(s, Ident(), kind, std::move(operand));
+   inline expr_t emitUnOp(op::Kind kind, expr_t&& operand) {
+      return emitUnOp(Ident(), kind, std::move(operand));
    }
 
    template <typename... Tokens>
@@ -172,9 +255,25 @@ class Parser {
    _EmitterT emitter_{};
 
    Scope scope_{};
+
    DiagnosticTracker& diagnostics_;
    Tracer tracer_;
    Factory factory_;
+
+   // todo: may be part of custom scope datastructure
+   bool isMissingDefaultInitiation(ssa_t* var) {
+      return std::find_if(missingDefaultInitiations_.begin(), missingDefaultInitiations_.end(), [&](auto* v) {
+                return v->ssa == var;
+             }) != missingDefaultInitiations_.end();
+   }
+
+   bool isExternalDeclaration(ssa_t* var) {
+      return std::find_if(externDeclarations_.begin(), externDeclarations_.end(), [&](auto* v) {
+                return v->ssa == var;
+             }) != externDeclarations_.end();
+   }
+   std::vector<ScopeInfo*> externDeclarations_;
+   std::vector<ScopeInfo*> missingDefaultInitiations_;
 };
 // ---------------------------------------------------------------------------
 // TokenCounter
@@ -226,7 +325,7 @@ bool isDeclaratorStart(token::Kind kind) {
 }
 // ---------------------------------------------------------------------------
 bool isStorageClassSpecifier(token::Kind kind) {
-   return (kind >= token::Kind::AUTO && kind <= token::Kind::THREAD_LOCAL) || kind == token::Kind::TYPEDEF;
+   return (kind >= token::Kind::AUTO && kind <= token::Kind::THREAD_LOCAL) || kind == token::Kind::TYPEDEF || kind == token::Kind::EXTERN || kind == token::Kind::STATIC || kind == token::Kind::REGISTER;
 }
 // ---------------------------------------------------------------------------
 bool isFunctionSpecifier(token::Kind kind) {
@@ -235,6 +334,10 @@ bool isFunctionSpecifier(token::Kind kind) {
 // ---------------------------------------------------------------------------
 bool isDeclarationSpecifier(token::Kind kind) {
    return isTypeSpecifierQualifier(kind) || isStorageClassSpecifier(kind) || isFunctionSpecifier(kind);
+}
+// ---------------------------------------------------------------------------
+bool isDeclarationStart(token::Kind kind) {
+   return isDeclarationSpecifier(kind) || kind == token::Kind::STATIC_ASSERT;
 }
 // ---------------------------------------------------------------------------
 bool isSelectionStmtStart(token::Kind kind) {
@@ -253,66 +356,95 @@ bool isPrimaryBlockStart(token::Kind kind) {
    return kind == token::Kind::L_C_BRKT || isJumpStmtStart(kind) || isSelectionStmtStart(kind) || isIterationStmtStart(kind);
 }
 // ---------------------------------------------------------------------------
+bool isLabelStmtStart(token::Kind first, token::Kind second) {
+   return (first == token::Kind::IDENT && second == token::Kind::COLON) || first == token::Kind::CASE || first == token::Kind::DEFAULT;
+}
+// ---------------------------------------------------------------------------
 // Parser
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-void Parser<_EmitterT>::parseParameterList(std::vector<TY>& paramTys, std::vector<Ident>& paramNames) {
+bool Parser<_EmitterT>::parseParameterList(std::vector<TY>& paramTys, std::vector<Ident>& paramNames) {
    tracer_ << ENTER{"parseParameterList"};
-   while (isDeclarationSpecifier(pos_->getKind())) {
+   auto sg = scope_.guard();
+   while (isDeclarationSpecifier(pos_->getKind()) || pos_->getKind() == TK::ELLIPSIS) {
+      if (consumeAnyOf(TK::ELLIPSIS)) {
+         tracer_ << EXIT{"parseParameterList"};
+         return true;
+      }
       parseOptAttributeSpecifierSequence();
       TY ty = parseSpecifierQualifierList();
 
-      // todo: (jr) not abstract declarator
-      // todo: (jr) isDeclaratorStart
-      if (isDeclaratorStart(pos_->getKind())) {
-         // todo: handle names in casts/abstract declerators
-         Declarator decl = parseDeclarator(ty);
-         paramTys.push_back(decl.ty);
-         paramNames.push_back(decl.ident);
-         scope_.insert(decl.ident, ScopeInfo(decl.ty)); // todo: (jr) error on failure
-      } else if (isAbstractDeclaratorStart(pos_->getKind())) {
-         ty = parseAbstractDeclarator(ty);
-         paramTys.push_back(ty);
-         paramNames.push_back(Ident());
+      // todo: handle names in casts/abstract declerators
+      Declarator decl = parseDeclarator(ty);
+      if (decl.ty.kind() == TYK::VOID) {
+         if (paramTys.size() > 0) {
+            diagnostics_ << "void must be the only parameter" << std::endl;
+         }
+         if (decl.ident) {
+            diagnostics_ << "void must not have a name" << std::endl;
+         }
+         break;
       }
-      tracer_ << "parameter: " << ty << std::endl;
+      paramTys.push_back(decl.ty);
+      paramNames.push_back(decl.ident);
+
+      if (decl.ident && !scope_.insert(decl.ident, ScopeInfo(decl.ty))) {
+         diagnostics_ << "Redefinition of parameter " << decl.ident << std::endl;
+      }
+
+      tracer_ << "parameter: " << decl.ty << std::endl;
+      if (!consumeAnyOf(TK::COMMA)) {
+         break;
+      }
    }
    tracer_ << EXIT{"parseParameterList"};
+   return false;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-typename Parser<_EmitterT>::State Parser<_EmitterT>::parseStmt(State s) {
+int Parser<_EmitterT>::parseOptLabelList(std::vector<attr_t>& attr) {
+   int labelCount = 0;
+   bb_t* labelTarget = nullptr;
+   // todo: (jr) makr not recursive but ruther iterative as long as there are labels
+   for (TK kind = pos_->getKind(); isLabelStmtStart(kind, pos_.peek()); kind = pos_->getKind(), ++labelCount) {
+      if (!labelTarget) {
+         labelTarget = emitter_.emitBB(Ident("label"), state.fn);
+         emitter_.emitJump(state.bb, labelTarget);
+         state.bb = labelTarget;
+      }
+      ++pos_;
+      if (consumeAnyOf(TK::CASE)) {
+         // case-statement
+         // expr_t expr = parseExpr();
+         assert(false && "not implemented");
+      } else if (consumeAnyOf(TK::DEFAULT)) {
+         // default-statement
+         assert(false && "not implemented");
+      } else {
+         // labeled-statement
+         Ident label = pos_->getValue<Ident>();
+         if (state.labels.contains(label)) {
+            diagnostics_ << "Redefinition of label " << label << std::endl;
+         }
+         state.labels[label] = labelTarget;
+      }
+      expect(TK::COLON);
+      attr = parseOptAttributeSpecifierSequence();
+   }
+   return labelCount;
+}
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+void Parser<_EmitterT>::parseStmt() {
    tracer_ << ENTER{"parseStmt"};
    std::vector<attr_t> attr = parseOptAttributeSpecifierSequence();
-   expr_t expr;
-
-   Token t = *pos_;
-   TK kind = t.getKind();
-   // todo: (jr) makr not recursive but ruther iterative as long as there are labels
-   if (kind == TK::CASE || kind == TK::DEFAULT || (kind == TK::IDENT && pos_.peek() == TK::COLON)) {
-      // todo: labeled-statement
-      // if (consumeAnyOf(TK::CASE)) {
-      //    // case-statement
-      //    expr = parseExpr();
-      //    // todo: assert constant expression
-      // } else if (consumeAnyOf(TK::DEFAULT)) {
-      //    // default-statement
-      //
-      // } else {
-      //    // labeled-statement
-      //    // todo: handle label
-      // }
-      // expect(TK::COLON);
-      // parseStmt();
-   } else {
-      s = parseUnlabledStmt(s, attr);
-   }
+   parseOptLabelList(attr);
+   parseUnlabledStmt(attr);
    tracer_ << EXIT{"parseStmt"};
-   return s;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-typename Parser<_EmitterT>::State Parser<_EmitterT>::parseDeclStmt(State s, const std::vector<attr_t>& attr, bool isTopLevel) {
+void Parser<_EmitterT>::parseDeclStmt(const std::vector<attr_t>& attr) {
    // todo: static_assert-declaration
    tracer_ << ENTER{"parseDeclStmt"};
 
@@ -322,85 +454,102 @@ typename Parser<_EmitterT>::State Parser<_EmitterT>::parseDeclStmt(State s, cons
       DeclarationSpecifier declSpec = parseDeclarationSpecifierList();
 
       do {
-         scope_.enter();
          Declarator decl = parseDeclarator(declSpec.ty);
          factory_.clearFragments();
-         scope_.leave();
 
-         ssa_t* var = nullptr;
          ScopeInfo* info = scope_.find(decl.ident);
+         bool canInsert = scope_.canInsert(decl.ident);
+
+         std::string_view what = decl.ty.kind() == TYK::FN_T ? "function " : "variable ";
+         if (!canInsert && !scope_.isTopLevel()) {
+            diagnostics_ << "Redefinition of " << what << decl.ident << std::endl;
+         } else if (scope_.isTopLevel() && info && info->ty != decl.ty) {
+            diagnostics_ << "Redecleration of " << what << decl.ident << " with a different type: " << declSpec.ty << " vs " << info->ty << std::endl;
+         } else if (!scope_.isTopLevel() && decl.ty.kind() == TYK::FN_T) {
+            diagnostics_ << "Nested function definitions not allowed" << std::endl;
+         }
 
          if (decl.ty.kind() == TYK::FN_T) {
-            if (info) {
-               if (info->ty != decl.ty) {
-                  diagnostics_ << "Identifier '" << decl.ident << "' redeclared as different kind of symbol" << std::endl;
-                  diagnostics_ << "Previous declaration: " << info->ty << std::endl;
-               } else if (info->ssa && !emitter_.isFnProto(static_cast<fn_t*>(info->ssa))) {
-                  diagnostics_ << "Redefinition of function '" << decl.ident << "'" << std::endl;
-               }
-            }
-
-            if (!info || !info->ssa) {
-               // function prototype
-               s.fn = emitter_.emitFnProto(decl.ident, decl.ty.emitterType());
-            } else {
-               s.fn = static_cast<fn_t*>(info->ssa);
-            }
+            // set function of state, potentially reusing the function if it was already declared
+            state.fn = info ? info->fn : emitter_.emitFnProto(decl.ident, decl.ty);
+            state.retTy = decl.ty.getRetTy();
 
             if (pos_->getKind() == TK::L_C_BRKT) {
-               if (!isTopLevel) {
-                  diagnostics_ << "Nested function definitions not allowed" << std::endl;
-               }
                // function body
-               parseFunctionDefinition(decl, s);
+               parseFunctionDefinition(decl);
                goto end_parse_decl;
             }
 
-            if (!info) {
-               scope_.insert(decl.ident, ScopeInfo(decl.ty, s.fn));
-            } else {
-               info->ssa = s.fn;
+            if (canInsert) {
+               info = scope_.insert(decl.ident, ScopeInfo(decl.ty, state.fn));
             }
 
          } else {
-            // todo: (jr) initializer
-            const_t* value = nullptr;
+            bool isGlobal = scope_.isTopLevel() || declSpec.storageClass[0] == TK::STATIC || declSpec.storageClass[1] == TK::STATIC;
+
+            ssa_t* var;
+            if (canInsert) {
+               var = isGlobal ?
+                   emitter_.emitGlobalVar(decl.ty, decl.ident) :
+                   emitter_.emitLocalVar(state.fn, state.entry, decl.ty, decl.ident);
+
+               info = scope_.insert(decl.ident, ScopeInfo(decl.ty, var));
+            } else {
+               var = info->ssa;
+            }
+
             if (consumeAnyOf(TK::ASSIGN)) {
-               assert(decl.ty.kind() != TYK::FN_T && "Function definition not allowed");
+               if (info->ty.kind() == TYK::FN_T) {
+                  diagnostics_ << "Illegal Inizilizer. Only variables can be initialized" << std::endl;
+               } else if (scope_.isTopLevel() && !canInsert && info->ssa && !isMissingDefaultInitiation(info->ssa) && !isExternalDeclaration(info->ssa)) {
+                  diagnostics_ << "Redefinition of variable " << decl.ident << std::endl;
+               }
+               const_t* value = nullptr;
+
                if (consumeAnyOf(TK::L_C_BRKT)) {
                   // initializer-list
                   // todo:
-                  parseInitializerList(s);
+                  parseInitializerList();
+                  assert(false && "not implemented");
                   expect(TK::R_C_BRKT);
                } else {
-                  expr_t expr = parseAssignmentExpr(s);
+                  expr_t expr = parseAssignmentExpr();
                   // todo: track if constant in expr
-                  value = static_cast<const_t*>(asRVal(s, expr));
+                  value = static_cast<const_t*>(asRVal(expr));
                }
-               // todo: handle semantics
-            }
 
-            if (isTopLevel || declSpec.storageClass[0] == TK::STATIC || declSpec.storageClass[1] == TK::STATIC) {
-               var = emitter_.emitGlobalVar(decl.ty.emitterType(), decl.ident, value);
-            } else {
-               var = emitter_.emitLocalVar(s.fn, s.entry, decl.ty.emitterType(), decl.ident, value);
-            }
+               if (isGlobal) {
+                  emitter_.setInitValueGlobalVar(var, value);
 
-            if (!scope_.insert(decl.ident, ScopeInfo(decl.ty, var))) {
-               diagnostics_ << pos_->getLoc() << "Redefinition of variable " << decl.ident << std::endl;
+                  auto it = std::find(missingDefaultInitiations_.begin(), missingDefaultInitiations_.end(), info);
+                  if (it != missingDefaultInitiations_.end()) {
+                     missingDefaultInitiations_.erase(it);
+                  }
+                  it = std::find(externDeclarations_.begin(), externDeclarations_.end(), info);
+                  if (it != externDeclarations_.end()) {
+                     externDeclarations_.erase(it);
+                  }
+
+               } else {
+                  emitter_.setInitValueLocalVar(state.fn, var, value);
+               }
+            } else if (isGlobal) {
+               if (declSpec.storageClass[0] == TK::EXTERN) {
+                  externDeclarations_.push_back(info);
+               } else {
+                  missingDefaultInitiations_.push_back(info);
+               }
             }
          }
-
       } while (consumeAnyOf(TK::COMMA));
       expect(TK::SEMICOLON);
    }
 end_parse_decl:
    tracer_ << EXIT{"parseDeclStmt"};
-   return s;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-typename Parser<_EmitterT>::expr_t Parser<_EmitterT>::parseInitializerList(State s) {
+typename Parser<_EmitterT>::expr_t Parser<_EmitterT>::parseInitializerList() {
    if (consumeAnyOf(TK::L_C_BRKT)) {
       // todo: initializer-list
       tracer_ << " = { ... }" << std::endl;
@@ -408,7 +557,7 @@ typename Parser<_EmitterT>::expr_t Parser<_EmitterT>::parseInitializerList(State
       expect(TK::R_C_BRKT);
    } else {
       // expression
-      auto expr = parseExpr(s);
+      auto expr = parseExpr();
       tracer_ << " = " << *expr << std::endl;
       // todo: handle semantics
    }
@@ -416,47 +565,48 @@ typename Parser<_EmitterT>::expr_t Parser<_EmitterT>::parseInitializerList(State
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-void Parser<_EmitterT>::parseFunctionDefinition(Declarator& decl, State s) {
-   tracer_ << ENTER{"function-definition"};
-   s.entry = s.bb = emitter_.emitFn(s.fn);
-   scope_.enter();
+void Parser<_EmitterT>::parseFunctionDefinition(Declarator& decl) {
+   tracer_ << ENTER{"functionDefinition"};
+   auto sg = scope_.guard();
+   state.entry = state.bb = emitter_.emitFn(state.fn);
    for (unsigned i = 0; i < decl.ty.getParamTys().size(); ++i) {
       TY paramTy = decl.ty.getParamTys()[i];
       Ident paramName = decl.paramNames[i];
-      ssa_t* paramValue = emitter_.getParam(s.fn, i);
-      ssa_t* localParamValue = emitter_.emitLocalVar(s.fn, s.entry, paramTy.emitterType(), paramName, paramValue);
+      ssa_t* paramValue = emitter_.getParam(state.fn, i);
+      ssa_t* localParamValue = emitter_.emitLocalVar(state.fn, state.entry, paramTy, paramName, paramValue);
       scope_.insert(paramName, ScopeInfo(paramTy, localParamValue));
    }
 
    // function-definition
-   parseCompoundStmt(s);
-   scope_.leave();
-   tracer_ << EXIT{"function-definition"};
+   parseCompoundStmt();
+   // optional return statement for void functions
+   if (state.retTy.kind() == TYK::VOID) {
+      // emitter_.emitReturn(state.bb, nullptr);
+   }
+
+   tracer_ << EXIT{"functionDefinition"};
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-typename Parser<_EmitterT>::State Parser<_EmitterT>::parseCompoundStmt(State s) {
+void Parser<_EmitterT>::parseCompoundStmt() {
    tracer_ << ENTER{"parseCompoundStmt"};
    expect(TK::L_C_BRKT);
 
    while (pos_->getKind() != TK::R_C_BRKT && pos_->getKind() != TK::END) {
       auto attr = parseOptAttributeSpecifierSequence();
-
+      parseOptLabelList(attr);
       if (isTypeSpecifierQualifier(pos_->getKind())) {
-         s = parseDeclStmt(s, attr);
-      } else if (pos_->getKind() == TK::IDENT && pos_.peek() == TK::COLON) {
-         // todo: handle label
+         parseDeclStmt(attr);
       } else {
-         s = parseUnlabledStmt(s, attr);
+         parseUnlabledStmt(attr);
       }
    }
    expect(TK::R_C_BRKT);
    tracer_ << EXIT{"parseCompoundStmt"};
-   return s;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-typename Parser<_EmitterT>::State Parser<_EmitterT>::parseUnlabledStmt(State s, const std::vector<attr_t>& attr) {
+void Parser<_EmitterT>::parseUnlabledStmt(const std::vector<attr_t>& attr) {
    tracer_ << ENTER{"parseUnlabledStmt"};
    Token t = *pos_;
    TK kind = t.getKind();
@@ -465,82 +615,120 @@ typename Parser<_EmitterT>::State Parser<_EmitterT>::parseUnlabledStmt(State s, 
    if (kind == TK::L_C_BRKT) {
       // todo: attribute-specifier-sequenceopt
       scope_.enter();
-      s = parseCompoundStmt(s);
+      parseCompoundStmt();
       scope_.leave();
    } else if (isSelectionStmtStart(kind)) {
       // selection-statement
-      bb_t* then = emitter_.emitBB(Ident("then"), s.fn);
+      bb_t* then = emitter_.emitBB(Ident("then"), state.fn);
       bb_t* otherwise = nullptr;
       expr_t cond;
 
       if (consumeAnyOf(TK::IF)) {
          expect(TK::L_BRACE);
-         cond = parseExpr(s);
+         cond = parseExpr();
          expect(TK::R_BRACE);
-         std::swap(s.bb, then);
-         parseStmt(s);
-         std::swap(s.bb, then);
+         std::swap(state.bb, then);
+         parseStmt();
+         std::swap(state.bb, then);
 
          if (consumeAnyOf(TK::ELSE)) {
-            otherwise = emitter_.emitBB(Ident("else"), s.fn);
-            std::swap(s.bb, otherwise);
-            parseStmt(s);
-            std::swap(s.bb, otherwise);
+            otherwise = emitter_.emitBB(Ident("else"), state.fn);
+            std::swap(state.bb, otherwise);
+            parseStmt();
+            std::swap(state.bb, otherwise);
          }
 
       } else {
          expect(TK::SWITCH);
          expect(TK::L_BRACE);
-         cond = parseExpr(s);
+         cond = parseExpr();
          expect(TK::R_BRACE);
          // todo: parseStmt();
       }
 
-      cont = emitter_.emitBB(Ident("cont"), s.fn);
+      cont = emitter_.emitBB(Ident("cont"), state.fn);
       if (otherwise) {
-         emitter_.emitBranch(s.bb, then, otherwise, asRVal(s, cond));
+         emitter_.emitBranch(state.bb, then, otherwise, asRVal(cond));
          emitter_.emitJump(otherwise, cont);
       } else {
-         emitter_.emitBranch(s.bb, then, cont, asRVal(s, cond));
+         emitter_.emitBranch(state.bb, then, cont, asRVal(cond));
       }
       emitter_.emitJump(then, cont);
    } else if (isIterationStmtStart(kind)) {
       // iteration-statement
-      expr_t cond;
-      bb_t* body = emitter_.emitBB(Ident("body"), s.fn);
       if (consumeAnyOf(TK::WHILE)) {
          expect(TK::L_BRACE);
-         cond = parseExpr(s);
+         // cond = parseExpr();
          expect(TK::R_BRACE);
-         parseStmt(s);
+         parseStmt();
       } else if (consumeAnyOf(TK::DO)) {
-         parseStmt(s);
+         // emitter_.emitJump(state.bb, body);
+         // state.bb= body;
+         parseStmt();
+         // body = state.bb;
          expect(TK::WHILE);
          expect(TK::L_BRACE);
-         cond = parseExpr(s);
+         // cond = parseConditionExpr();
+         // emitter_.emitBranch(state.bb, body, cont, cond);
          expect(TK::R_BRACE);
       } else {
+         auto sg = scope_.guard();
          expect(TK::FOR);
          expect(TK::L_BRACE);
-
-         // for ( expressionopt ; expressionopt ; expressionopt ) secondary-block
-         // for ( declaration expressionopt ; expressionopt ) secondary-block
+         std::vector<attr_t> attr{parseOptAttributeSpecifierSequence()};
+         if (isDeclarationStart(pos_->getKind())) {
+            parseDeclStmt(attr);
+         } else if (pos_->getKind() != TK::SEMICOLON) {
+            parseExpr();
+         }
+         ssa_t* cond = nullptr;
+         bb_t* condBB = nullptr;
+         bb_t* updateBB = nullptr;
+         if (pos_->getKind() != TK::SEMICOLON) {
+            cond = parseConditionExpr();
+            condBB = state.bb;
+         }
+         expect(TK::SEMICOLON);
+         if (pos_->getKind() != TK::R_BRACE) {
+            state.bb = updateBB = emitter_.emitBB(Ident("update"), state.fn);
+            parseExpr();
+         }
+         expect(TK::R_BRACE);
+         state.bb = emitter_.emitBB(Ident("body"), state.fn, updateBB);
+         parseStmt();
+         condBB = condBB ? condBB : state.bb;
+         if (updateBB) {
+            emitter_.emitJump(updateBB, condBB);
+         } else {
+            updateBB = condBB;
+         }
+         emitter_.emitJump(state.bb, updateBB);
+         cont = emitter_.emitBB(Ident("cont"), state.fn);
+         emitter_.emitBranch(condBB, state.bb, cont, cond);
       }
+
    } else if (isJumpStmtStart(kind)) {
       // jump-statement
       // todo: (jr) not implemented
       if (consumeAnyOf(TK::GOTO)) {
+         Ident label = pos_->getValue<Ident>();
+         if (state.labels.contains(label)) {
+            emitter_.emitJump(state.bb, state.labels[label]);
+         } else {
+            state.incompleteGotos[label].push_back(state.bb);
+         }
       } else if (consumeAnyOf(TK::CONTINUE)) {
       } else if (consumeAnyOf(TK::BREAK)) {
       } else if (consumeAnyOf(TK::RETURN)) {
          ssa_t* value = nullptr;
+         expr_t expr;
          if (pos_->getKind() != TK::SEMICOLON) {
-            expr_t expr = parseExpr(s);
-            value = asRVal(s, expr);
+            expr = parseExpr();
+            value = asRVal(expr);
          }
          expect(TK::SEMICOLON);
-         emitter_.emitRet(s.bb, value);
-
+         value = cast(expr->ty, state.retTy, value);
+         state.missingReturns.push_back({state.bb, value});
       } else {
          assert(false && "not implemented");
       }
@@ -548,7 +736,7 @@ typename Parser<_EmitterT>::State Parser<_EmitterT>::parseUnlabledStmt(State s, 
       // expression-statement
       expr_t expr;
       if (pos_->getKind() != TK::SEMICOLON) {
-         expr = parseExpr(s);
+         expr = parseExpr();
       }
       expect(TK::SEMICOLON);
       if (!expr && !attr.empty()) {
@@ -557,18 +745,14 @@ typename Parser<_EmitterT>::State Parser<_EmitterT>::parseUnlabledStmt(State s, 
    }
    tracer_ << EXIT{"parseUnlabledStmt"};
    if (cont) {
-      s.bb = cont;
+      state.bb = cont;
    }
-   return s;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-Parser<_EmitterT>::expr_t Parser<_EmitterT>::parseExpr(State s, short midPrec) {
+Parser<_EmitterT>::expr_t Parser<_EmitterT>::parseExpr(short midPrec) {
    tracer_ << ENTER{"parseExpr"};
-   tracer_ << "current token: " << *pos_ << std::endl;
-
-   expr_t lhs = parsePrimaryExpr(s);
-   tracer_ << "current token: " << *pos_ << std::endl;
+   expr_t lhs = parsePrimaryExpr();
    while (*pos_ && pos_->getKind() != TK::SEMICOLON) {
       op::OpSpec spec{op::getOpSpec(*pos_)};
 
@@ -587,19 +771,19 @@ Parser<_EmitterT>::expr_t Parser<_EmitterT>::parseExpr(State s, short midPrec) {
             return lhs;
          case TK::INC:
          case TK::DEC:
-            lhs = emitUnOp(s, tk == TK::INC ? op::Kind::POSTINC : op::Kind::POSTDEC, std::move(lhs));
+            lhs = emitUnOp(tk == TK::INC ? op::Kind::POSTINC : op::Kind::POSTDEC, std::move(lhs));
             ++pos_;
             continue;
          case TK::L_BRACKET:
             ++pos_;
-            // todo: lhs = std::make_unique<Expr>(s.bb, op::Kind::SUBSCRIPT, std::move(lhs), parseExpr(s.bb));
+            // todo: lhs = std::make_unique<Expr>(state.bb, op::Kind::SUBSCRIPT, std::move(lhs), parseExpr(state.bb));
             expect(TK::R_BRACKET);
             continue;
          case TK::DEREF:
          case TK::PERIOD:
             ++pos_;
             assert(pos_->getKind() == TK::IDENT && "member access"); // todo: (jr) not implemented
-            // todo: lhs = std::make_unique<Expr>(s.bb, tk == TK::DEREF ? op::Kind::MEMBER_DEREF : op::Kind::MEMBER, std::move(lhs), std::make_unique<Expr>(s.bb, *pos_));
+            // todo: lhs = std::make_unique<Expr>(state.bb, tk == TK::DEREF ? op::Kind::MEMBER_DEREF : op::Kind::MEMBER, std::move(lhs), std::make_unique<Expr>(state.bb, *pos_));
             ++pos_;
             continue;
          case TK::L_BRACE:
@@ -615,14 +799,25 @@ Parser<_EmitterT>::expr_t Parser<_EmitterT>::parseExpr(State s, short midPrec) {
                   if (args.size() > 0) {
                      expect(TK::COMMA);
                   }
-                  expr_t expr = parseExpr(s);
+                  expr_t expr = parseAssignmentExpr();
                   // todo: type cast
-                  args.push_back(asRVal(s, expr));
+                  args.push_back(asRVal(expr));
                }
                // todo: (jr) not implemented
                expect(TK::R_BRACE);
-               ssa_t* ssa = emitter_.emitCall(s.bb, lhs->ident, static_cast<fn_t*>(asRVal(s, lhs)), args);
-               lhs = std::make_unique<Expr>(op::Kind::CALL, lhs->ty.getRetTy(), std::move(lhs), ssa);
+               ssa_t* ssa = nullptr;
+               TY retTy;
+               if (lhs->ty.kind() == TYK::FN_T) {
+                  ssa = emitter_.emitCall(state.bb, Ident(), static_cast<fn_t*>(lhs->ssa), args);
+                  retTy = lhs->ty.getRetTy();
+               } else if (lhs->ty.kind() == TYK::PTR_T && lhs->ty.getPointedToTy().kind() == TYK::FN_T) {
+                  ssa_t* fn = asRVal(lhs);
+                  ssa = emitter_.emitCall(state.bb, Ident(), lhs->ty.getPointedToTy(), fn, args);
+                  retTy = lhs->ty.getPointedToTy().getRetTy();
+               } else {
+                  diagnostics_ << "called object is not a function or function pointer" << std::endl;
+               }
+               lhs = std::make_unique<Expr>(op::Kind::CALL, retTy, std::move(lhs), ssa);
                continue;
             }
          default:
@@ -630,22 +825,25 @@ Parser<_EmitterT>::expr_t Parser<_EmitterT>::parseExpr(State s, short midPrec) {
             ++pos_;
       }
 
-      expr_t rhs = parseExpr(s, spec.precedence + !spec.leftAssociative);
       op::Kind kind = op::getBinOpKind(tk);
-      ssa_t* ssa = emitter_.emitBinOp(s.bb, Ident(), kind, asRVal(s, lhs), asRVal(s, rhs));
-      lhs = std::make_unique<Expr>(kind, TY::commonRealType(kind, lhs->ty, rhs->ty), std::move(lhs), std::move(rhs), ssa);
+      ssa_t* lhsSsa = (kind != op::Kind::ASSIGN) ? asRVal(lhs) : nullptr;
+
+      expr_t rhs = parseExpr(spec.precedence + !spec.leftAssociative);
+
+      TY resTy = factory_.commonRealType(lhs->ty, rhs->ty);
+      lhsSsa = cast(lhs->ty, resTy, lhsSsa);
+      ssa_t* rhsSsa = cast(rhs->ty, resTy, asRVal(rhs));
+
+      ssa_t* ssa = emitter_.emitBinOp(state.bb, resTy, Ident(), kind, lhsSsa, rhsSsa, lhs->ssa);
+
+      lhs = std::make_unique<Expr>(kind, resTy, std::move(lhs), std::move(rhs), ssa);
    }
-   std::cout << std::string(80, '-') << std::endl
-             << "src loc: " << std::endl;
-   std::cout << diagnostics_.getSourceLine(lhs->loc) << std::endl;
-   std::cout << std::string(80, '-') << std::endl;
-   std::cout << *lhs << std::endl;
    tracer_ << EXIT{"parseExpr"};
    return lhs;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-Parser<_EmitterT>::expr_t Parser<_EmitterT>::parsePrimaryExpr(State s) {
+Parser<_EmitterT>::expr_t Parser<_EmitterT>::parsePrimaryExpr() {
    tracer_ << ENTER{"parsePrimaryExpr"};
    tracer_ << "current token: " << *pos_ << std::endl;
    expr_t expr;
@@ -667,7 +865,7 @@ Parser<_EmitterT>::expr_t Parser<_EmitterT>::parsePrimaryExpr(State s) {
       case TK::DCONST:
       case TK::LDCONST:
          ty = factory_.fromToken(t);
-         value = emitter_.emitConst(s.bb, ty.emitterType(), Ident(), t.getValue<int>());
+         value = emitter_.emitConst(ty, Ident(), t.getValue<int>());
          expr = std::make_unique<Expr>(pos_->getLoc(), ty, value, true);
          // todo:expr->isConstExpr = true;
          ++pos_;
@@ -676,7 +874,10 @@ Parser<_EmitterT>::expr_t Parser<_EmitterT>::parsePrimaryExpr(State s) {
          name = t.getValue<Ident>();
          info = scope_.find(name);
          if (!info) {
-            diagnostics_ << "Undeclared identifier '" << name << "'" << std::endl;
+            diagnostics_ << t.getLoc() << "Undeclared identifier '" << name << "'" << std::endl;
+            value = emitter_.emitPoison();
+            ty = factory_.undefTy();
+            ty = factory_.harden(ty);
          } else {
             value = info->ssa;
             ty = info->ty;
@@ -689,7 +890,7 @@ Parser<_EmitterT>::expr_t Parser<_EmitterT>::parsePrimaryExpr(State s) {
       case TK::UWB_ICONST:
          // todo: (jr) is this also a string? case TK::CLITERAL:
          assert(false && "Not implemented");
-         // expr = std::make_unique<Expr>(s.bb, t);
+         // expr = std::make_unique<Expr>(state.bb, t);
          ++pos_;
          break;
 
@@ -699,11 +900,12 @@ Parser<_EmitterT>::expr_t Parser<_EmitterT>::parsePrimaryExpr(State s) {
          if (isTypeSpecifierQualifier(pos_->getKind())) {
             TY ty = parseTypeName();
             expect(TK::R_BRACE);
-            expr_t lhs = parseExpr(s, 2);
+            expr_t lhs = parseExpr(2);
             // todo: (jr) type cast
-            expr = std::make_unique<Expr>(op::Kind::CAST, ty, std::move(lhs), nullptr);
+            value = cast(lhs->ty, ty, asRVal(lhs));
+            expr = std::make_unique<Expr>(op::Kind::CAST, ty, std::move(lhs), value);
          } else {
-            expr = parseExpr(s);
+            expr = parseExpr();
             expr->setPrec(0);
             expect(TK::R_BRACE);
          }
@@ -774,19 +976,17 @@ Parser<_EmitterT>::expr_t Parser<_EmitterT>::parsePrimaryExpr(State s) {
                return expr;
          }
          ++pos_;
-         expr_t operand = parseExpr(s, 2);
+         expr_t operand = parseExpr(2);
          // todo: type
-         expr = emitUnOp(s, kind, std::move(operand));
+         expr = emitUnOp(kind, std::move(operand));
    }
    tracer_ << EXIT{"parsePrimaryExpr"};
    return expr;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-typename Parser<_EmitterT>::TY Parser<_EmitterT>::parseAbstractDeclarator(TY specifierQualifier) {
-   // todo: (jr) dublicate code
-   // todo: remove dublicate types
-   tracer_ << ENTER{"parseAbstractDeclarator"};
+typename Parser<_EmitterT>::Declarator Parser<_EmitterT>::parseDeclarator(TY specifierQualifier) {
+   tracer_ << ENTER{"parseDeclarator"};
    Declarator decl = parseDeclaratorImpl();
    if (decl.ty) {
       *decl.base = specifierQualifier;
@@ -795,36 +995,41 @@ typename Parser<_EmitterT>::TY Parser<_EmitterT>::parseAbstractDeclarator(TY spe
       decl.ty = specifierQualifier;
    }
 
+   decl.ty = factory_.harden(decl.ty);
+   decl.base = DeclTypeBaseRef{};
+   tracer_ << EXIT{"parseDeclarator"};
+   return decl;
+}
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+typename Parser<_EmitterT>::TY Parser<_EmitterT>::parseAbstractDeclarator(TY specifierQualifier) {
+   // todo: (jr) dublicate code
+   // todo: remove dublicate types
+   tracer_ << ENTER{"parseAbstractDeclarator"};
+   Declarator decl = parseDeclarator(specifierQualifier);
+
    if (decl.ident) {
       diagnostics_ << "Identifier '" << decl.ident << "' not allowed in abstract declarator" << std::endl;
    }
 
-   TY ty = factory_.harden(decl.ty);
-   tracer_ << "ty: " << ty << std::endl;
    tracer_ << EXIT{"parseAbstractDeclarator"};
-   return ty;
+   return decl.ty;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-typename Parser<_EmitterT>::Declarator Parser<_EmitterT>::parseDeclarator(TY specifierQualifier) {
-   tracer_ << ENTER{"parseDeclarator"};
+typename Parser<_EmitterT>::Declarator Parser<_EmitterT>::parseDirectDeclarator(TY specifierQualifier) {
+   tracer_ << ENTER{"parseDirectDeclarator"};
    SrcLoc loc = pos_->getLoc();
    tracer_ << *pos_ << std::endl;
    tracer_ << "loc: " << loc.loc << std::endl;
 
-   Declarator decl{parseDeclaratorImpl()};
-   if (decl.ty) {
-      *decl.base = specifierQualifier;
-      // now, there might be duplicate types
-   } else {
-      decl.ty = specifierQualifier;
-   }
-   decl.ty = factory_.harden(decl.ty);
+   Declarator decl{parseDeclarator(specifierQualifier)};
+
    loc |= pos_->getLoc();
    if (!decl.ident) {
       diagnostics_ << loc << "Expected identifier in declaration" << std::endl;
    }
-   tracer_ << EXIT{"parseDeclarator"};
+   tracer_ << EXIT{"parseDirectDeclarator"};
    return decl;
 }
 // ---------------------------------------------------------------------------
@@ -890,7 +1095,19 @@ typename Parser<_EmitterT>::Declarator Parser<_EmitterT>::parseDeclaratorImpl() 
          static_ = parseOpt(TK::STATIC);
 
          // todo: (jr) type-qualifier-list only for non abstract declarator
-         static_ |= parseOpt(TK::STATIC);
+         bool qualifiers[4] = {false, false, false, false};
+         bool qualified = false;
+         while (isTypeQualifier(pos_->getKind())) {
+            qualified = true;
+            qualifiers[static_cast<int>(pos_->getKind()) - static_cast<int>(TK::CONST)] = true;
+            ++pos_;
+         }
+         if (parseOpt(TK::STATIC)) {
+            if (static_) {
+               diagnostics_ << "static used multiple times" << std::endl;
+            }
+            static_ = true;
+         }
 
          if (parseOpt(TK::ASTERISK)) {
             unspecSize = true;
@@ -898,20 +1115,27 @@ typename Parser<_EmitterT>::Declarator Parser<_EmitterT>::parseDeclaratorImpl() 
             if (static_) {
                diagnostics_ << "static and * used together" << std::endl;
             }
+            if (!decl.ident && qualified) {
+               diagnostics_ << "Type qualifiers not allowed in abstract declarator" << std::endl;
+            }
          } else {
-            // todo: assignment-expression opt
-            // todo: static requires assignment-expression
             if (pos_->getKind() != TK::R_BRACKET) {
-               // todo: auto expr = parseExpr(s, 14);
-               // todo: assert(expr->ty == TY{TYK::INT} && "array size must be integer");
-               size = 3; // todo: expr->token.template getValue<int>();
+               expr_t expr = parseAssignmentExpr();
+               if (!expr->ty.isIntegerType()) {
+                  diagnostics_ << "Array size must be an integer type" << std::endl;
+               }
+
+               // WIP
+
                unspecSize = false;
+            } else if (static_) {
+               diagnostics_ << "Static array must have a size" << std::endl;
             }
          }
 
          // todo: unspecSize, varLen
          // todo: static
-         TY arrTy{factory_.arrayOf({}, size, varLen, unspecSize)};
+         TY arrTy{factory_.arrayOf({}, size, unspecSize)};
          rhsBase.chain(arrTy);
          if (!rhsTy) {
             rhsTy = arrTy;
@@ -923,15 +1147,7 @@ typename Parser<_EmitterT>::Declarator Parser<_EmitterT>::parseDeclaratorImpl() 
          // todo: parameter-type-listopt
 
          std::vector<TY> paramTys{};
-         parseParameterList(paramTys, decl.paramNames);
-         bool varargs = false;
-
-         if (paramTys.size() == 0 && consumeAnyOf(TK::ELLIPSIS)) {
-            varargs = true;
-         } else if (consumeAnyOf(TK::COMMA)) {
-            expect(TK::ELLIPSIS);
-            varargs = true;
-         }
+         bool varargs = parseParameterList(paramTys, decl.paramNames);
          expect(TK::R_BRACE);
 
          TY fnTy{factory_.function({}, paramTys, varargs)};
@@ -980,12 +1196,12 @@ typename Parser<_EmitterT>::DeclarationSpecifier Parser<_EmitterT>::parseDeclara
    TY& ty{declSpec.ty};
    Token ident;
 
-   TokenCounter<TK::CHAR, TK::DECIMAL128> tycount{};
+   TokenCounter<TK::BOOL, TK::COMPLEX> tycount{};
    auto& scSpec{declSpec.storageClass};
 
    bool qualifiers[3] = {false, false, false};
 
-   for (Token t = *pos_; t.getKind() >= TK::VOID && t.getKind() <= TK::ALIGNAS; t = *++pos_) {
+   for (Token t = *pos_; isDeclarationSpecifier(t.getKind()); t = *++pos_) {
       TK type = t.getKind();
 
       if (isStorageClassSpecifier(type)) {
@@ -1065,64 +1281,58 @@ typename Parser<_EmitterT>::DeclarationSpecifier Parser<_EmitterT>::parseDeclara
 
    if (!ty) {
       // float | DECIMAL[32|64|128] | COMPLEX | BOOL
-      constexpr std::array<std::pair<TK, TYK>, 6> mapping = {
-          {{TK::FLOAT, TYK::FLOAT},
-           {TK::DECIMAL32, TYK::DECIMAL32},
-           {TK::DECIMAL64, TYK::DECIMAL64},
-           {TK::DECIMAL128, TYK::DECIMAL128},
-           {TK::COMPLEX, TYK::COMPLEX},
-           {TK::BOOL, TYK::BOOL}}};
-
-      for (auto [k, v] : mapping) {
-         if (tycount.consume(k)) {
+      constexpr std::array<TK, 6> singleTypeSpecifier = {TK::FLOAT, TK::DECIMAL32, TK::DECIMAL64, TK::DECIMAL128, TK::COMPLEX, TK::BOOL};
+      for (TK t : singleTypeSpecifier) {
+         if (tycount.consume(t)) {
+            TYK v = static_cast<TYK>(static_cast<int>(t) - static_cast<int>(TK::BOOL) + static_cast<int>(TYK::BOOL));
             ty = factory_.realTy(v);
             break;
          }
       }
+   }
 
-      if (!ty) {
-         // [signed | unsigned] char
-         // [signed | unsigned] short [int]
-         // [signed | unsigned] int | signed | unsigned
-         // [signed | unsigned] long [int]
-         // [signed | unsigned] long long [int]
-         // long double
-         // double
+   if (!ty) {
+      // [signed | unsigned] char
+      // [signed | unsigned] short [int]
+      // [signed | unsigned] int | signed | unsigned
+      // [signed | unsigned] long [int]
+      // [signed | unsigned] long long [int]
+      // long double
+      // double
 
-         bool unsigned_ = tycount.consume(TK::UNSIGNED);
-         bool signed_ = tycount.consume(TK::SIGNED);
-         bool int_ = tycount.consume(TK::INT);
+      bool unsigned_ = tycount.consume(TK::UNSIGNED);
+      bool signed_ = tycount.consume(TK::SIGNED);
+      bool int_ = tycount.consume(TK::INT);
 
-         int longs = std::min(2, static_cast<int>(tycount[TK::LONG]));
+      int longs = std::min(2, static_cast<int>(tycount[TK::LONG]));
 
-         if (unsigned_ && signed_) {
-            diagnostics_ << "specifier singed and unsigned used together" << std::endl;
-         }
+      if (unsigned_ && signed_) {
+         diagnostics_ << "specifier singed and unsigned used together" << std::endl;
+      }
 
-         if (tycount.consume(TK::CHAR)) {
-            // int token cannot be used with char
-            tycount[TK::INT] += int_;
-            ty = factory_.integralTy(TYK::CHAR, unsigned_);
-         } else if (tycount.consume(TK::SHORT)) {
-            ty = factory_.integralTy(TYK::SHORT, unsigned_);
-         } else if (tycount[TK::DOUBLE] >= 1) {
-            --tycount[TK::DOUBLE];
-            if (longs == 1) {
-               --tycount[TK::LONG];
-               ty = factory_.realTy(TYK::LONGDOUBLE);
-            } else {
-               ty = factory_.realTy(TYK::DOUBLE);
-            }
-         } else if (longs == 1) {
-            tycount[TK::LONG] -= longs;
-            ty = factory_.integralTy(TYK::LONG, unsigned_);
-         } else if (longs == 2) {
-            tycount[TK::LONG] -= longs;
-            ty = factory_.integralTy(TYK::LONGLONG, unsigned_);
+      if (tycount.consume(TK::CHAR)) {
+         // int token cannot be used with char
+         tycount[TK::INT] += int_;
+         ty = factory_.integralTy(TYK::CHAR, unsigned_);
+      } else if (tycount.consume(TK::SHORT)) {
+         ty = factory_.integralTy(TYK::SHORT, unsigned_);
+      } else if (tycount[TK::DOUBLE] >= 1) {
+         --tycount[TK::DOUBLE];
+         if (longs == 1) {
+            --tycount[TK::LONG];
+            ty = factory_.realTy(TYK::LONGDOUBLE);
          } else {
-            // must be int
-            ty = factory_.integralTy(TYK::INT, unsigned_);
+            ty = factory_.realTy(TYK::DOUBLE);
          }
+      } else if (longs == 1) {
+         tycount[TK::LONG] -= longs;
+         ty = factory_.integralTy(TYK::LONG, unsigned_);
+      } else if (longs == 2) {
+         tycount[TK::LONG] -= longs;
+         ty = factory_.integralTy(TYK::LONGLONG, unsigned_);
+      } else {
+         // must be int
+         ty = factory_.integralTy(TYK::INT, unsigned_);
       }
    }
 
@@ -1193,7 +1403,7 @@ Parser<_EmitterT>::TY Parser<_EmitterT>::parseTypeName() {
    TY ty = parseSpecifierQualifierList();
 
    // todo: is this needed? if (isAbstractDeclaratorStart(pos_->getKind()))
-   // todo: attribute-specifier-sequence (opt)
+   auto attr = parseOptAttributeSpecifierSequence();
    TY declTy = parseAbstractDeclarator(ty);
 
    tracer_ << "type-name: " << ty << std::endl;
