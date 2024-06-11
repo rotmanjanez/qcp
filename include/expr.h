@@ -38,7 +38,8 @@ class Expr {
                                                    ty{ty},
                                                    loc{loc},
                                                    ident{i},
-                                                   ssa{ssa} {}
+                                                   ssa{ssa} {
+   }
 
    Expr(SrcLoc loc, TY& ty, ssa_t* ssa, bool isConstExpr) : op{},
                                                             opspec{0, 0},
@@ -46,10 +47,6 @@ class Expr {
                                                             ty{ty},
                                                             loc{loc},
                                                             ssa{ssa} {}
-
-   ~Expr() {
-      std::cout << *this << std::endl;
-   }
 
    Expr(OpKind op, const TY& ty, std::unique_ptr<Expr>&& lhs, ssa_t* ssa, Ident name = Ident()) : op{op},
                                                                                                   opspec{getOpSpec(op)},

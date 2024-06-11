@@ -75,7 +75,6 @@ class DiagnosticTracker {
       if (pf == static_cast<std::ostream& (*) (std::ostream&)>(std::endl)) {
          DiagnosticMessage diag{*this, os_.str(), loc_};
          report(diag);
-         std::cerr << diag << std::endl;
          os_.clear();
          loc_ = {};
       }

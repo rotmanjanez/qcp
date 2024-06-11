@@ -17,7 +17,7 @@ using Token = qcp::token::Token;
 using TY = qcp::type::Type<std::string>;
 using TYK = qcp::type::Kind;
 using Parser = qcp::Parser<qcp::DiagnosticTracker>;
-using Factory = qcp::type::BaseFactory<std::string>;
+using TypeFactory = qcp::type::TypeFactory<std::string>;
 // ---------------------------------------------------------------------------
 bool SINGED = false;
 bool UNSIGNED = true;

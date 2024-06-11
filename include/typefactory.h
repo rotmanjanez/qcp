@@ -13,18 +13,37 @@
 namespace qcp {
 namespace type {
 // ---------------------------------------------------------------------------
+constexpr bool UNSIGNED = true;
+constexpr bool SIGNED = false;
+// ---------------------------------------------------------------------------
 template <typename _EmitterT>
-class BaseFactory {
+class TypeFactory {
    using Base = Base<_EmitterT>;
    using TY = Type<_EmitterT>;
    using emitter_t = _EmitterT;
+   using emitter_ssa_t = typename _EmitterT::ssa_t;
    using Token = token::Token;
 
    public:
-   BaseFactory(emitter_t& emitter) : emitter{emitter}, types(1), typeFragments(1) {}
+   TypeFactory(emitter_t& emitter) : emitter{emitter}, types(3), typeFragments(1) {
+      // todo: this is ugly af
+      types[1] = Base{Kind::INT, SIGNED};
+      types[2] = Base{Kind::INT, UNSIGNED};
+
+      types[1].populateEmitterType(emitter);
+      types[2].populateEmitterType(emitter);
+   }
+
+   TY undefTy() {
+      return TY{types, 0};
+   }
 
    TY voidTy() {
       return TY{construct(Kind::VOID)};
+   }
+
+   TY boolTy() {
+      return TY{construct(Kind::BOOL)};
    }
 
    TY integralTy(Kind integerKind, bool unsignedTy) {
@@ -35,6 +54,10 @@ class BaseFactory {
       return TY{construct(realKind)};
    }
 
+   TY intTy(bool unsignedTy) {
+      return TY{types, static_cast<unsigned short>(1 + unsignedTy)};
+   }
+
    TY ptrTo(const TY& other) {
       return TY{construct(other)};
    }
@@ -43,8 +66,11 @@ class BaseFactory {
       return TY{construct(base, 0, true, false)};
    }
 
-   TY arrayOf(const TY& base, size_t size, bool varLen = false, bool unspecifiedSize = false) {
-      return TY{construct(base, size, unspecifiedSize, varLen)};
+   TY arrayOf(const TY& base, size_t size, bool unspecifiedSize = false) {
+      return TY{construct(base, size, unspecifiedSize)};
+   }
+   TY arrayOf(const TY& base, emitter_ssa_t* size, bool unspecifiedSize = false) {
+      return TY{construct(base, size, unspecifiedSize)};
    }
 
    // todo: replace with move
@@ -84,6 +110,14 @@ class BaseFactory {
 
       TY ty{construct(static_cast<Kind>(tVal), hasSigness && (tkVal & 1))};
       return harden(ty);
+   }
+
+   TY promote(TY ty) {
+      if (ty.base().rank() < static_cast<int>(Kind::INT)) {
+         return intTy(!ty.isSigned());
+      }
+      // todo: aother probotions: eg bit field
+      return ty;
    }
 
    class DeclTypeBaseRef {
@@ -130,7 +164,7 @@ class BaseFactory {
          }
          Base& base = derivedFrom();
 
-         return base.kind > Kind::VOID && base.kind != Kind::UNDEF;
+         return base.kind > Kind::NULLPTR_T && base.kind != Kind::END;
       }
 
       private:
@@ -146,7 +180,7 @@ class BaseFactory {
    std::pair<unsigned short, std::vector<Base>&> construct(Args... args);
 
    TY harden(TY ty) {
-      if (ty.emitterType()) {
+      if (!ty || ty.emitterType()) {
          return ty;
       }
 
@@ -175,17 +209,59 @@ class BaseFactory {
       typeFragments.emplace_back();
    }
 
+   // ---------------------------------------------------------------------------
+   TY commonRealType(TY lhs, TY rhs) {
+      // todo: undef not necessary in when type of identifier is known
+      if (!lhs) {
+         return rhs;
+      } else if (!rhs) {
+         return lhs;
+      }
+
+      // Usual arithmetic conversions
+      // todo: If one operand has decimal floating type, the other operand shall not have standard floating, complex, or imaginary type.
+
+      const TY& higher = lhs > rhs ? lhs : rhs;
+
+      if (higher.base().kind >= Kind::FLOAT) {
+         return higher;
+      }
+      // todo: enums
+
+      // integer promotion
+      // todo: what happens with qualifiers?
+      lhs = promote(lhs);
+      rhs = promote(rhs);
+
+      if (lhs == rhs) {
+         return lhs;
+      } else if (lhs.isSigned() == rhs.isSigned()) {
+         return lhs > rhs ? lhs : rhs;
+      } else {
+         if (lhs.isSigned()) {
+            std::swap(lhs, rhs);
+         }
+         // now, lhs is unsigned and rhs is signed
+         if (lhs >= rhs) {
+            return lhs;
+         } else {
+            TY crt{construct(rhs.kind(), UNSIGNED)};
+            return harden(crt);
+         }
+      }
+   }
+
    private:
    emitter_t& emitter;
    std::vector<Base> types;
    std::vector<Base> typeFragments;
 };
 // ---------------------------------------------------------------------------
-// BaseFactory
+// TypeFactory
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
 template <typename... Args>
-std::pair<unsigned short, std::vector<Base<_EmitterT>>&> BaseFactory<_EmitterT>::construct(Args... args) {
+std::pair<unsigned short, std::vector<Base<_EmitterT>>&> TypeFactory<_EmitterT>::construct(Args... args) {
    auto it = std::find(types.begin(), types.end(), Base{args...});
    if (it != types.end()) {
       return {static_cast<unsigned short>(std::distance(types.begin(), it)), types};

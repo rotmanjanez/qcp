@@ -15,22 +15,7 @@ namespace op {
 // Operators sorted by precedence
 // clang-format off
 enum class Kind {
-   POSTINC, POSTDEC, CALL, SUBSCRIPT, MEMBER, MEMBER_DEREF, COMPOUND_LITERAL,
-   PREINC, PREDEC, UNARY_PLUS, UNARY_MINUS, L_NOT, BW_NOT, CAST, DEREF, ADDROF, SIZEOF, ALIGNOF,
-   MUL, DIV, REM,
-   ADD, SUB,
-   SHL, SHR,
-   LT, LE, GT, GE,
-   EQ, NE,
-   BW_AND,
-   BW_XOR,
-   BW_OR,
-   L_AND,
-   L_OR,
-
-   COND,
-   ASSIGN, ADD_ASSIGN, SUB_ASSIGN, MUL_ASSIGN, DIV_ASSIGN, REM_ASSIGN, SHL_ASSIGN, SHR_ASSIGN, BW_AND_ASSIGN, BW_XOR_ASSIGN, BW_OR_ASSIGN,
-   COMMA,
+   #include "defs/operators.def"
 };
 // clang-format on
 // ---------------------------------------------------------------------------
@@ -50,6 +35,8 @@ Kind getBinOpKind(const token::Token& token);
 OpSpec getOpSpec(const Kind kind);
 // ---------------------------------------------------------------------------
 OpSpec getOpSpec(const token::Token& token);
+// ---------------------------------------------------------------------------
+bool isAssignmentOp(const Kind kind);
 // ---------------------------------------------------------------------------
 } // namespace op
 } // namespace qcp

@@ -49,25 +49,15 @@ OpSpec getOpSpec(const Kind kind) {
    return opspecs[static_cast<int>(kind)];
 }
 // ---------------------------------------------------------------------------
+bool isAssignmentOp(const Kind kind) {
+   return kind >= Kind::ASSIGN && kind <= Kind::BW_OR_ASSIGN;
+}
+// ---------------------------------------------------------------------------
 std::ostream& operator<<(std::ostream& os, const Kind& kind) {
    static const char* names[] = {
-       // clang-format off
-      "POSTINC", "POSTDEC", "CALL", "SUBSCRIPT", "MEMBER", "MEMBER_DEREF", "COMPOUND_LITERAL",
-      "PREINC", "PREDEC", "UNARY_PLUS", "UNARY_MINUS", "L_NOT", "BW_NOT", "CAST", "DEREF", "ADDROF", "SIZEOF", "ALIGNOF",
-      "MUL", "DIV", "REM",
-      "ADD", "SUB",
-      "SHL", "SHR",
-      "LT", "LE", "GT", "GE",
-      "EQ", "NE",
-      "BW_AND",
-      "BW_XOR",
-      "BW_OR",
-      "L_AND",
-      "L_OR",
-      "COND",
-      "ASSIGN", "ADD_ASSIGN", "SUB_ASSIGN", "MUL_ASSIGN", "DIV_ASSIGN", "REM_ASSIGN", "SHL_ASSIGN", "SHR_ASSIGN", "BW_AND_ASSIGN", "BW_XOR_ASSIGN", "BW_OR_ASSIGN",
-      "COMMA",
-       // clang-format on
+#define ENUM_AS_STRING
+#include "defs/operators.def"
+#undef ENUM_AS_STRING
    };
    return os << names[static_cast<int>(kind)];
 }

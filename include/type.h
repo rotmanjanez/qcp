@@ -12,19 +12,13 @@ namespace qcp {
 namespace type {
 // ---------------------------------------------------------------------------
 enum class Kind {
+#include "defs/types.def"
+};
+// ---------------------------------------------------------------------------
+enum class Cast {
    // clang-format off
-   BOOL, CHAR, SHORT, INT, LONG, LONGLONG,
-   
-   FLOAT, DOUBLE, LONGDOUBLE,
-
-   DECIMAL32, DECIMAL64, DECIMAL128,
-   COMPLEX,
-
-   NULLPTR_T,
-   VOID,
-
-   PTR_T, ARRAY_T, STRUCT_T, ENUM_T, UNION_T, FN_T,
-   UNDEF,
+   TRUNC, ZEXT, SEXT, FPTOUI, FPTOSI, UITOFP, SITOFP, FPTRUNC, FPEXT,
+   PTRTOINT, INTTOPTR, BITCAST,
    // clang-format on
 };
 // ---------------------------------------------------------------------------
@@ -32,7 +26,7 @@ template <typename _EmitterT>
 struct Base;
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-class BaseFactory;
+class TypeFactory;
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
 struct TaggedType;
@@ -40,17 +34,19 @@ struct TaggedType;
 template <typename _EmitterT>
 class Type {
    using Base = Base<_EmitterT>;
-   using Factory = BaseFactory<_EmitterT>;
+   using TypeFactory = TypeFactory<_EmitterT>;
    using Token = token::Token;
 
    template <typename T>
    friend std::ostream& operator<<(std::ostream& os, const Type<T>& ty);
 
-   friend Factory;
+   friend TypeFactory;
 
-   friend typename Factory::DeclTypeBaseRef;
+   friend typename TypeFactory::DeclTypeBaseRef;
 
    explicit Type(std::pair<unsigned short, std::vector<Base>&> ini) : index_{ini.first}, types_{&ini.second} {}
+
+   explicit Type(std::vector<Base>& types, unsigned short index) : index_{index}, types_{&types} {}
 
    public:
    Type() : index_{0}, types_(nullptr) {}
@@ -59,6 +55,50 @@ class Type {
    Type(Type&& other) = default;
    Type& operator=(const Type& other) = default;
    Type& operator=(Type&& other) = default;
+
+   bool isIntegerType() const {
+      switch (base().kind) {
+         case Kind::CHAR:
+         case Kind::SHORT:
+         case Kind::INT:
+         case Kind::LONG:
+         case Kind::LONGLONG:
+            return true;
+         default:
+            return false;
+      }
+   }
+
+   bool isFloatingType() const {
+      switch (base().kind) {
+         case Kind::FLOAT:
+         case Kind::DOUBLE:
+         case Kind::LONGDOUBLE:
+            return true;
+         default:
+            return false;
+      }
+   }
+
+   bool isArithmetic() const {
+      return isIntegerType() || isFloatingType();
+   }
+
+   bool isPointerType() const {
+      return base().kind == Kind::PTR_T;
+   }
+
+   bool isSigned() const {
+      return !base().unsingedTy;
+   }
+
+   bool isBasicType() const {
+      return isFloatingType() || isIntegerType();
+   }
+
+   bool variablyModified() const {
+      return base().variablyModified();
+   }
 
    static Type discardQualifiers(const Type& other) {
       Type ty{other};
@@ -92,12 +132,6 @@ class Type {
       }
    }
 
-   Type promote() const {
-      // todo: assert(Base().kind <= Kind::LONGLONG && "Invalid Base::Kind to promote()");
-      // todo: promote integers
-      return *this;
-   }
-
    Kind kind() const {
       return base().kind;
    }
@@ -114,11 +148,13 @@ class Type {
       return base().arrayTy.elemTy;
    }
 
+   Type getPointedToTy() const {
+      return base().ptrTy;
+   }
+
    const std::vector<TaggedType<_EmitterT>>& getMembers() const {
       return base().structOrUnionTy.members;
    }
-
-   static Type commonRealType(op::Kind op, const Type& lhs, const Type& rhs);
 
    const Base& base() const {
       assert(types_ && "Type is not initialized");
@@ -216,52 +252,6 @@ std::ostream& operator<<(std::ostream& os, const Type<_EmitterT>& ty) {
    return os;
 }
 // ---------------------------------------------------------------------------
-template <typename _EmitterT>
-Type<_EmitterT> Type<_EmitterT>::commonRealType(op::Kind kind, const Type& lhs, const Type& rhs) {
-   // todo: undef not necessary in when type of identifier is known
-   if (lhs.base().kind == Kind::UNDEF || rhs.base().kind == Kind::UNDEF) {
-      return Type();
-   }
-
-   // Usual arithmetic conversions
-   // todo: If one operand has decimal floating type, the other operand shall not have standard floating, complex, or imaginary type.
-
-   if (kind <= op::Kind::ALIGNOF) {
-      // todo: differtent unary operators yield different types. replace by a switch statement
-      return Type::discardQualifiers(lhs);
-   }
-
-   const Type& higher = lhs > rhs ? lhs : rhs;
-
-   if (higher.base().kind >= Kind::FLOAT) {
-      return Type::discardQualifiers(higher);
-   }
-   // todo: enums
-
-   // integer promotion
-   // todo: what happens with qualifiers?
-   const Type lhsPromoted{lhs.promote()};
-   const Type rhsPromoted{rhs.promote()};
-
-   if (lhsPromoted == rhsPromoted) {
-      return Type::discardQualifiers(lhsPromoted);
-   } else if (lhsPromoted.base().unsingedTy == rhsPromoted.base().unsingedTy) {
-      return Type::discardQualifiers(lhsPromoted > rhsPromoted ? lhsPromoted : rhsPromoted);
-   } else {
-      const Type& unsignedTy = lhsPromoted.base().unsingedTy ? lhsPromoted : rhsPromoted;
-      const Type& signedTy = lhsPromoted.base().unsingedTy ? rhsPromoted : lhsPromoted;
-      if (unsignedTy >= signedTy) {
-         return Type::discardQualifiers(unsignedTy);
-      } else { //  if (signedTy > unsignedTy) {
-         return Type::discardQualifiers(signedTy);
-      }
-
-      // } else {
-      // todo: (jr) what to do here?
-      // return Type(signedTy.base().kind, true);
-      // }
-   }
-}
 } // namespace type
 } // namespace qcp
 // ---------------------------------------------------------------------------
