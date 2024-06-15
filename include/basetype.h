@@ -56,7 +56,7 @@ struct Base {
    Base(TY retTy, const std::vector<TY>& paramTys, bool isVarArg) : kind{Kind::FN_T}, fnTy{paramTys, retTy, isVarArg} {}
 
    // Struct or Union type
-   Base(token::Kind tk, std::vector<TaggedTY> members, bool incomplete) : kind{tk == token::Kind::STRUCT ? Kind::STRUCT_T : Kind::UNION_T}, structOrUnionTy{incomplete, 0, members} {
+   Base(token::Kind tk, std::vector<TaggedTY> members, bool incomplete, Ident tag) : kind{tk == token::Kind::STRUCT ? Kind::STRUCT_T : Kind::UNION_T}, structOrUnionTy{incomplete, tag, members} {
       assert(tk == token::Kind::STRUCT || tk == token::Kind::UNION && "Invalid token::Kind for struct or union");
    }
 
@@ -94,73 +94,11 @@ struct Base {
       return ss.str();
    }
 
-   void strImpl(std::stringstream& ss) const {
-      static const char* names[] = {
-#define ENUM_AS_STRING
-#include "defs/types.def"
-#undef ENUM_AS_STRING
-      };
-      if ((kind < Kind::FLOAT || (kind >= Kind::DECIMAL32 && kind <= Kind::DECIMAL128)) && signedness == Signedness::UNSIGNED) {
-         ss << "unsigned ";
-      }
-      if (kind < Kind::NULLPTR_T) {
-         ss << names[static_cast<int>(kind)];
-      } else {
-         std::stringstream prepend;
-         switch (kind) {
-            case Kind::PTR_T:
-               ss << '*';
-               ptrTy.base().strImpl(ss);
-               break;
-            case Kind::ARRAY_T:
-               arrayTy.elemTy.base().strImpl(ss);
-               if (arrayTy.varSize) {
-                  ss << "[]";
-               } else {
-                  ss << '[' << arrayTy.fixedSize << ']';
-               }
-               break;
-            case Kind::STRUCT_T:
-            case Kind::UNION_T:
-            case Kind::ENUM_T:
-               assert(false && "Not implemented");
-               break;
-            case Kind::FN_T:
-               prepend << fnTy.retTy;
-               if (!ss.str().empty()) {
-                  prepend << '(';
-                  ss << ')';
-               }
-               ss << '(';
-               for (size_t i = 0; i < fnTy.paramTys.size(); ++i) {
-                  ss << fnTy.paramTys[i];
-                  if (i + 1 < fnTy.paramTys.size()) {
-                     ss << ", ";
-                  }
-               }
-               if (fnTy.isVarArg) {
-                  if (!fnTy.paramTys.empty()) {
-                     ss << ", ";
-                  }
-                  ss << "...";
-               }
-               ss << ')';
-               prepend << ss.str();
-               ss.str(prepend.str());
-               break;
-            case Kind::END:
-               ss << "undef";
-               break;
-            default:
-               ss << "unknown(" << static_cast<int>(kind) << ')';
-               break;
-         }
-      }
-   }
+   void strImpl(std::stringstream& ss) const;
 
    struct StructOrUnionTy {
       bool incomplete;
-      unsigned tag;
+      Ident tag;
       std::vector<TaggedTY> members;
       // todo: XXX attributes; // e.g. __attribute__((packed))
       // todo: XXX members; // might have flexible array member; might have bitfields; might be anonymous union or structures, might have alignas()
@@ -331,6 +269,7 @@ void Base<_EmitterT>::populateEmitterType(_EmitterT& emitter) {
 
    unsigned bits = 0;
 
+   // todo: union, enum
    if (kind == Kind::PTR_T) {
       ref = emitter.emitPtrTo(ptrTy);
       return;
@@ -344,43 +283,146 @@ void Base<_EmitterT>::populateEmitterType(_EmitterT& emitter) {
          ref = emitter.emitArrayTy(arrayTy.elemTy, arrayTy.fixedSize);
       }
       return;
-   }
-   // todo: struct, union, enum
+   } else if (kind == Kind::VOID) {
+      ref = emitter.emitVoidTy();
+   } else if (kind == Kind::FLOAT) {
+      ref = emitter.emitFloatTy();
+   } else if (kind == Kind::DOUBLE) {
+      ref = emitter.emitDoubleTy();
+   } else if (kind == Kind::STRUCT_T) {
+      std::vector<TY> members;
+      for (const auto& member : structOrUnionTy.members) {
+         members.push_back(member.ty);
+      }
+      ref = emitter.emitStructTy(members, structOrUnionTy.tag.prefix("struct."));
+   } else if (kind == Kind::UNION_T) {
+      TY max = structOrUnionTy.members.front().ty;
+      for (const auto& member : structOrUnionTy.members) {
+         if (emitter.getIntegerValue(emitter.sizeOf(member.ty)) > emitter.getIntegerValue(emitter.sizeOf(max))) {
+            max = member.ty;
+         }
+      }
+      //  std::max_element(structOrUnionTy.members.begin(), structOrUnionTy.members.end(), [&emitter](const TaggedTY& a, const TaggedTY& b) {            return emitter.getIntegerValue(emitter.sizeOf(a.ty)) < emitter.getIntegerValue(emitter.sizeOf(b.ty));})->ty;
+      std::vector<TY> members{max};
 
-   switch (kind) {
-      case Kind::BOOL:
-         bits = 1;
-         break;
-      case Kind::CHAR:
-         bits = CHAR_BITS;
-         break;
-      case Kind::SHORT:
-         bits = SHORT_BITS;
-         break;
-      case Kind::INT:
-         bits = INT_BITS;
-         break;
-      case Kind::LONG:
-         bits = LONG_BITS;
-         break;
-      case Kind::LONGLONG:
-         bits = LONG_LONG_BITS;
-         break;
-      case Kind::VOID:
-         ref = emitter.emitVoidTy();
-         return;
-      case Kind::FLOAT:
-         ref = emitter.emitFloatTy();
-         return;
-      case Kind::DOUBLE:
-         ref = emitter.emitDoubleTy();
-         return;
-      default:
-         // todo: (jr) not implemented
-         std::cerr << "Invalid Base::Kind to populateEmitterType(): " << *this << std::endl;
-         assert(false && "Invalid Base::Kind to populateEmitterType()");
+      ref = emitter.emitStructTy(members, structOrUnionTy.tag.prefix("union."));
+   } else {
+      switch (kind) {
+         case Kind::BOOL:
+            bits = 1;
+            break;
+         case Kind::CHAR:
+            bits = CHAR_BITS;
+            break;
+         case Kind::SHORT:
+            bits = SHORT_BITS;
+            break;
+         case Kind::INT:
+            bits = INT_BITS;
+            break;
+         case Kind::LONG:
+            bits = LONG_BITS;
+            break;
+         case Kind::LONGLONG:
+            bits = LONG_LONG_BITS;
+            break;
+         case Kind::VOID:
+            ref = emitter.emitVoidTy();
+            return;
+         case Kind::FLOAT:
+            ref = emitter.emitFloatTy();
+            return;
+         case Kind::DOUBLE:
+            ref = emitter.emitDoubleTy();
+            return;
+         default:
+            // todo: (jr) not implemented
+            std::cerr << "Invalid Base::Kind to populateEmitterType(): " << *this << std::endl;
+            assert(false && "Invalid Base::Kind to populateEmitterType()");
+      }
+      ref = emitter.emitIntTy(bits);
    }
-   ref = emitter.emitIntTy(bits);
+}
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+void Base<_EmitterT>::strImpl(std::stringstream& ss) const {
+   static const char* names[] = {
+#define ENUM_AS_STRING
+#include "defs/types.def"
+#undef ENUM_AS_STRING
+   };
+   if ((kind < Kind::FLOAT || (kind >= Kind::DECIMAL32 && kind <= Kind::DECIMAL128)) && signedness == Signedness::UNSIGNED) {
+      ss << "unsigned ";
+   }
+   if (kind < Kind::NULLPTR_T) {
+      ss << names[static_cast<int>(kind)];
+   } else {
+      std::stringstream prepend;
+      switch (kind) {
+         case Kind::PTR_T:
+            ss << '*';
+            ptrTy.base().strImpl(ss);
+            break;
+         case Kind::ARRAY_T:
+            arrayTy.elemTy.base().strImpl(ss);
+            if (arrayTy.varSize) {
+               ss << "[]";
+            } else {
+               ss << '[' << arrayTy.fixedSize << ']';
+            }
+            break;
+         case Kind::STRUCT_T:
+         case Kind::UNION_T:
+            ss << (kind == Kind::STRUCT_T ? "struct" : "union");
+            if (structOrUnionTy.tag) {
+               ss << ' ' << structOrUnionTy.tag;
+            }
+            if (structOrUnionTy.incomplete) {
+               ss << " /* incomplete */";
+            }
+            ss << " {";
+            for (const auto& member : structOrUnionTy.members) {
+               ss << member.ty << ' ' << member.name;
+               if (member != structOrUnionTy.members.back()) {
+                  ss << "; ";
+               }
+            }
+            ss << '}';
+            break;
+         case Kind::ENUM_T:
+            assert(false && "Not implemented");
+            break;
+         case Kind::FN_T:
+            prepend << fnTy.retTy;
+            if (!ss.str().empty()) {
+               prepend << '(';
+               ss << ')';
+            }
+            ss << '(';
+            for (size_t i = 0; i < fnTy.paramTys.size(); ++i) {
+               ss << fnTy.paramTys[i];
+               if (i + 1 < fnTy.paramTys.size()) {
+                  ss << ", ";
+               }
+            }
+            if (fnTy.isVarArg) {
+               if (!fnTy.paramTys.empty()) {
+                  ss << ", ";
+               }
+               ss << "...";
+            }
+            ss << ')';
+            prepend << ss.str();
+            ss.str(prepend.str());
+            break;
+         case Kind::END:
+            ss << "undef";
+            break;
+         default:
+            ss << "unknown(" << static_cast<int>(kind) << ')';
+            break;
+      }
+   }
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>

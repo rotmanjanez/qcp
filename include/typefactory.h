@@ -93,8 +93,8 @@ class TypeFactory {
    }
 
    // todo: replace with move
-   TY structOrUnion(token::Kind tk, const std::vector<TaggedType<_EmitterT>>& members, bool incomplete) {
-      return TY{construct(tk, members, incomplete)};
+   TY structOrUnion(token::Kind tk, const std::vector<TaggedType<_EmitterT>>& members, bool incomplete, Ident tag = Ident()) {
+      return TY{construct(tk, members, incomplete, tag)};
    }
 
    TY fromToken(const Token& token) {
@@ -178,7 +178,7 @@ class TypeFactory {
          }
          Base& base = derivedFrom();
 
-         return base.kind > Kind::NULLPTR_T && base.kind != Kind::END;
+         return base.kind < Kind::UNION_T && base.kind > Kind::NULLPTR_T && base.kind != Kind::END;
       }
 
       private:

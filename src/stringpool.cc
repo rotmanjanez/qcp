@@ -7,18 +7,18 @@
 // ---------------------------------------------------------------------------
 namespace qcp {
 // ---------------------------------------------------------------------------
-std::vector<std::string_view> StringPool::strings_(1);
+std::vector<std::string> StringPool::strings_(1);
 // ---------------------------------------------------------------------------
 unsigned StringPool::insert(const char* str) {
-   return insert(std::string_view{str});
+   return insert(std::string(str));
 }
 // ---------------------------------------------------------------------------
-unsigned StringPool::insert(std::string_view str) {
+unsigned StringPool::insert(std::string&& str) {
    auto it = std::find(strings_.begin(), strings_.end(), str);
    if (it != strings_.end()) {
       return std::distance(strings_.begin(), it);
    }
-   strings_.push_back(str);
+   strings_.emplace_back(std::move(str));
    return strings_.size() - 1;
 }
 // ---------------------------------------------------------------------------
