@@ -26,58 +26,48 @@ class Expr {
    using OpKind = op::Kind;
 
    using ssa_t = typename _EmitterT::ssa_t;
+   using const_t = typename _EmitterT::const_t;
    using bb_t = typename _EmitterT::bb_t;
    using fn_t = typename _EmitterT::fn_t;
+   using value_t = typename _EmitterT::value_t;
 
    using ScopeInfo = ScopeInfo<_EmitterT>;
    using Scope = Scope<Ident, ScopeInfo>;
 
-   Expr(SrcLoc loc, TY& ty, Ident i, ssa_t* ssa) : op{},
-                                                   opspec{0, 0},
-                                                   mayBeLval_{true},
-                                                   ty{ty},
-                                                   loc{loc},
-                                                   ident{i},
-                                                   ssa{ssa} {
+   using expr_t = std::unique_ptr<Expr>;
+
+   Expr(SrcLoc loc, TY ty, value_t value, Ident id = Ident()) : op{},
+                                                                opspec{0, 0},
+                                                                // todo: may be redundant
+                                                                isConstExpr{std::holds_alternative<const_t*>(value)},
+                                                                mayBeLval_{!!id},
+                                                                ty{ty},
+                                                                loc{loc},
+                                                                ident{id},
+                                                                value{value} {}
+
+   Expr(OpKind op, TY ty, expr_t&& lhs, value_t value) : op{op},
+                                                         opspec{getOpSpec(op)},
+                                                         isConstExpr{std::holds_alternative<const_t*>(value)},
+                                                         ty{ty},
+                                                         loc{lhs->loc},
+                                                         lhs_{std::move(lhs)},
+                                                         rhs_{},
+                                                         value{value} {}
+
+   bool isIntConstExpr() const {
+      return isConstExpr && ty.isIntegerTy();
    }
 
-   Expr(SrcLoc loc, TY& ty, ssa_t* ssa, bool isConstExpr) : op{},
-                                                            opspec{0, 0},
-                                                            isConstExpr{isConstExpr},
-                                                            ty{ty},
-                                                            loc{loc},
-                                                            ssa{ssa} {}
-
-   Expr(OpKind op, const TY& ty, std::unique_ptr<Expr>&& lhs, ssa_t* ssa, Ident name = Ident()) : op{op},
-                                                                                                  opspec{getOpSpec(op)},
-                                                                                                  ty{ty},
-                                                                                                  loc{lhs->loc},
-                                                                                                  ident{name},
-                                                                                                  lhs_{std::move(lhs)},
-                                                                                                  rhs_{},
-                                                                                                  ssa{ssa} {
-      if (lhs_->isConstExpr) {
-         switch (op) {
-            case OpKind::PREINC:
-            case OpKind::PREDEC:
-            case OpKind::POSTINC:
-            case OpKind::POSTDEC:
-            case OpKind::CALL:
-               break;
-            default:
-               isConstExpr = true;
-         }
-      }
-   }
-
-   Expr(OpKind op, const TY& ty, std::unique_ptr<Expr>&& lhs, std::unique_ptr<Expr> rhs, ssa_t* ssa, Ident name = Ident()) : op{op},
-                                                                                                                             opspec{getOpSpec(op)},
-                                                                                                                             ty{ty},
-                                                                                                                             loc{lhs->loc | rhs->loc},
-                                                                                                                             ident{name},
-                                                                                                                             lhs_{std::move(lhs)},
-                                                                                                                             rhs_{std::move(rhs)},
-                                                                                                                             ssa{ssa} {
+   Expr(OpKind op, const TY& ty, expr_t&& lhs, expr_t&& rhs, value_t value, bool mayBeLval = false, Ident name = Ident()) : op{op},
+                                                                                                                            opspec{getOpSpec(op)},
+                                                                                                                            mayBeLval_{mayBeLval},
+                                                                                                                            ty{ty},
+                                                                                                                            loc{lhs->loc | rhs->loc},
+                                                                                                                            ident{name},
+                                                                                                                            lhs_{std::move(lhs)},
+                                                                                                                            rhs_{std::move(rhs)},
+                                                                                                                            value{value} {
       if (lhs_->isConstExpr && rhs_->isConstExpr && !((op >= OpKind::ASSIGN && op <= OpKind::COMMA))) {
          isConstExpr = true;
       }
@@ -105,11 +95,11 @@ class Expr {
    Ident ident;
 
    private:
-   std::unique_ptr<Expr> lhs_;
-   std::unique_ptr<Expr> rhs_;
+   expr_t lhs_;
+   expr_t rhs_;
 
    public:
-   ssa_t* ssa = nullptr;
+   value_t value;
 };
 // ---------------------------------------------------------------------------
 template <typename T>
