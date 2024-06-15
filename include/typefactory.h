@@ -21,41 +21,55 @@ class TypeFactory {
    using Base = Base<_EmitterT>;
    using TY = Type<_EmitterT>;
    using emitter_t = _EmitterT;
-   using emitter_ssa_t = typename _EmitterT::ssa_t;
+   using ssa_t = typename _EmitterT::ssa_t;
+   using iconst_t = typename _EmitterT::iconst_t;
    using Token = token::Token;
 
    public:
-   TypeFactory(emitter_t& emitter) : emitter{emitter}, types(3), typeFragments(1) {
-      // todo: this is ugly af
-      types[1] = Base{Kind::INT, SIGNED};
-      types[2] = Base{Kind::INT, UNSIGNED};
-
-      types[1].populateEmitterType(emitter);
-      types[2].populateEmitterType(emitter);
+   TypeFactory(emitter_t& emitter) : emitter{emitter}, types(5), typeFragments(1) {
+      types[1] = Base{Kind::BOOL};
+      types[2] = Base{Kind::INT, SIGNED};
+      types[3] = Base{Kind::INT, UNSIGNED};
+      types[4] = Base{Kind::LONGLONG, UNSIGNED};
+      for (auto it = types.begin() + 1; it != types.end(); ++it) {
+         it->populateEmitterType(emitter);
+      }
    }
 
+   // returns a already hardened type
    TY undefTy() {
       return TY{types, 0};
+   }
+
+   // returns a already hardened type
+   TY boolTy() {
+      return TY{types, static_cast<unsigned short>(1)};
+   }
+
+   // returns a already hardened type
+   TY sizetTy() {
+      return TY{types, static_cast<unsigned short>(4)};
+   }
+
+   // returns a already hardened type
+   TY intTy(bool unsignedTy) {
+      return TY{types, static_cast<unsigned short>(2 + unsignedTy)};
    }
 
    TY voidTy() {
       return TY{construct(Kind::VOID)};
    }
 
-   TY boolTy() {
-      return TY{construct(Kind::BOOL)};
-   }
-
    TY integralTy(Kind integerKind, bool unsignedTy) {
       return TY{construct(integerKind, unsignedTy)};
    }
 
-   TY realTy(Kind realKind) {
-      return TY{construct(realKind)};
+   TY charTy() {
+      return TY{construct(Kind::CHAR)};
    }
 
-   TY intTy(bool unsignedTy) {
-      return TY{types, static_cast<unsigned short>(1 + unsignedTy)};
+   TY realTy(Kind realKind) {
+      return TY{construct(realKind)};
    }
 
    TY ptrTo(const TY& other) {
@@ -63,13 +77,13 @@ class TypeFactory {
    }
 
    TY arrayOf(const TY& base) {
-      return TY{construct(base, 0, true, false)};
+      return TY{construct(base, static_cast<ssa_t*>(nullptr), true)};
    }
 
-   TY arrayOf(const TY& base, size_t size, bool unspecifiedSize = false) {
+   TY arrayOf(const TY& base, ssa_t* size, bool unspecifiedSize = false) {
       return TY{construct(base, size, unspecifiedSize)};
    }
-   TY arrayOf(const TY& base, emitter_ssa_t* size, bool unspecifiedSize = false) {
+   TY arrayOf(const TY& base, iconst_t* size, bool unspecifiedSize = false) {
       return TY{construct(base, size, unspecifiedSize)};
    }
 
@@ -114,7 +128,7 @@ class TypeFactory {
 
    TY promote(TY ty) {
       if (ty.base().rank() < static_cast<int>(Kind::INT)) {
-         return intTy(!ty.isSigned());
+         return intTy(!ty.isSignedTy());
       }
       // todo: aother probotions: eg bit field
       return ty;
@@ -235,16 +249,18 @@ class TypeFactory {
 
       if (lhs == rhs) {
          return lhs;
-      } else if (lhs.isSigned() == rhs.isSigned()) {
+      } else if (lhs.isSignedTy() == rhs.isSignedTy()) {
          return lhs > rhs ? lhs : rhs;
       } else {
-         if (lhs.isSigned()) {
+         if (lhs.isSignedTy()) {
             std::swap(lhs, rhs);
          }
          // now, lhs is unsigned and rhs is signed
          if (lhs >= rhs) {
             return lhs;
          } else {
+            // todo: check if representable
+            // signed long long + unsigned long -> unsigned long long (wenn beide 64 bit)
             TY crt{construct(rhs.kind(), UNSIGNED)};
             return harden(crt);
          }

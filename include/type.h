@@ -15,6 +15,12 @@ enum class Kind {
 #include "defs/types.def"
 };
 // ---------------------------------------------------------------------------
+enum class Signedness {
+   SIGNED,
+   UNSIGNED,
+   UNSPECIFIED,
+};
+// ---------------------------------------------------------------------------
 enum class Cast {
    // clang-format off
    TRUNC, ZEXT, SEXT, FPTOUI, FPTOSI, UITOFP, SITOFP, FPTRUNC, FPEXT,
@@ -49,15 +55,32 @@ class Type {
    explicit Type(std::vector<Base>& types, unsigned short index) : index_{index}, types_{&types} {}
 
    public:
+   struct Qualifiers {
+      bool operator==(const Qualifiers& other) const = default;
+      bool operator!=(const Qualifiers& other) const = default;
+
+      bool CONST = false;
+      bool RESTRICT = false;
+      bool VOLATILE = false;
+      // todo: bool ATOMIC = false;
+   };
+
    Type() : index_{0}, types_(nullptr) {}
+
+   Type(const Type& other, Qualifiers qualifiers) : qualifiers{qualifiers}, index_{other.index_}, types_{other.types_} {}
 
    Type(const Type& other) = default;
    Type(Type&& other) = default;
    Type& operator=(const Type& other) = default;
    Type& operator=(Type&& other) = default;
 
-   bool isIntegerType() const {
-      switch (base().kind) {
+   bool isBoolTy() const {
+      return kind() == Kind::BOOL;
+   }
+
+   bool isIntegerTy() const {
+      // todo: enum types
+      switch (kind()) {
          case Kind::CHAR:
          case Kind::SHORT:
          case Kind::INT:
@@ -69,8 +92,8 @@ class Type {
       }
    }
 
-   bool isFloatingType() const {
-      switch (base().kind) {
+   bool isFloatingTy() const {
+      switch (kind()) {
          case Kind::FLOAT:
          case Kind::DOUBLE:
          case Kind::LONGDOUBLE:
@@ -80,24 +103,72 @@ class Type {
       }
    }
 
-   bool isArithmetic() const {
-      return isIntegerType() || isFloatingType();
+   bool isDecimalTy() const {
+      switch (kind()) {
+         case Kind::DECIMAL32:
+         case Kind::DECIMAL64:
+         case Kind::DECIMAL128:
+            return true;
+         default:
+            return false;
+      }
    }
 
-   bool isPointerType() const {
+   bool isRealFloatingTy() const {
+      return isFloatingTy() || isDecimalTy();
+   }
+
+   bool isBasicTy() const {
+      return isRealFloatingTy() || isIntegerTy() || kind() == Kind::CHAR;
+   }
+
+   int rank() const {
+      return base().rank();
+   }
+
+   bool isCharacterTy() const {
+      return kind() == Kind::CHAR;
+   }
+
+   bool isArithmeticTy() const {
+      return isIntegerTy() || isRealFloatingTy(); // todo: this is wrong
+   }
+
+   bool isCompleteType() const {
+      switch (kind()) {
+         case Kind::VOID:
+            return false;
+         default:
+            return true;
+      }
+   }
+
+   bool isScalarTy() const {
+      return isArithmeticTy() || isPointerTy() || kind() == Kind::NULLPTR_T;
+   }
+
+   bool isAggregateTy() const {
+      return kind() == Kind::STRUCT_T || kind() == Kind::ARRAY_T;
+   }
+
+   bool isPointerTy() const {
       return base().kind == Kind::PTR_T;
    }
 
-   bool isSigned() const {
-      return !base().unsingedTy;
+   bool isSignedTy() const {
+      return base().signedness == Signedness::SIGNED;
    }
 
-   bool isBasicType() const {
-      return isFloatingType() || isIntegerType();
+   bool isSignedCharlikeTy() const {
+      return isCharacterTy() && (isSignedTy() || (base().signedness == Signedness::UNSPECIFIED && _EmitterT::CHAR_IS_SIGNED));
    }
 
    bool variablyModified() const {
       return base().variablyModified();
+   }
+
+   bool isVarArg() const {
+      return kind() == Kind::FN_T && base().fnTy.isVarArg;
    }
 
    static Type discardQualifiers(const Type& other) {
@@ -177,15 +248,7 @@ class Type {
       return index_ != 0 && types_ != nullptr;
    }
 
-   struct qualifiers {
-      bool operator==(const qualifiers& other) const = default;
-      bool operator!=(const qualifiers& other) const = default;
-
-      bool CONST = false;
-      bool RESTRICT = false;
-      bool VOLATILE = false;
-      // todo: bool ATOMIC = false;
-   } qualifiers;
+   Qualifiers qualifiers;
 
    private:
    // todo: maybe short is not enough

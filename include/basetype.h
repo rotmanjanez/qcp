@@ -26,29 +26,30 @@ struct Base {
    using TY = Type<_EmitterT>;
    using TaggedTY = TaggedType<_EmitterT>;
    using emitter_ty_t = typename _EmitterT::ty_t;
-   using emitter_ssa_t = typename _EmitterT::ssa_t;
+   using ssa_t = typename _EmitterT::ssa_t;
+   using iconst_t = typename _EmitterT::iconst_t;
 
-   unsigned CHAR_BITS = 8;
+   unsigned CHAR_BITS = _EmitterT::CHAR_HAS_16_BIT ? 16 : 8;
    static constexpr unsigned SHORT_BITS = 16;
-   static constexpr unsigned INT_BITS = 32;
+   static constexpr unsigned INT_BITS = _EmitterT::INT_HAS_64_BIT ? 64 : 32;
    static constexpr unsigned LONG_BITS = _EmitterT::LONG_HAS_64_BIT ? 64 : 32;
    static constexpr unsigned LONG_LONG_BITS = 64;
 
    Base() : kind{Kind::END} {}
 
    // todo: (jr) remove this constructor
-   constexpr explicit Base(Kind kind) : kind{kind}, unsingedTy{false} {}
+   constexpr explicit Base(Kind kind) : kind{kind}, signedness{Signedness::UNSPECIFIED} {}
 
-   Base(Kind integerKind, bool unsignedTy) : kind{integerKind}, unsingedTy{unsignedTy} {
-      assert(kind >= Kind::BOOL && kind <= Kind::DECIMAL128 && "Invalid Base::Kind for integer");
+   Base(Kind integerKind, bool unsignedTy) : kind{integerKind}, signedness{unsignedTy ? Signedness::UNSIGNED : Signedness::SIGNED} {
+      assert(kind >= Kind::BOOL && kind <= Kind::LONGLONG && kind != Kind::COMPLEX && "Invalid Base::Kind for integer");
    }
 
    // pointer type
    Base(TY ptrTy) : kind{Kind::PTR_T}, ptrTy{ptrTy} {}
 
    // array type
-   Base(TY elemTy, size_t size, bool unspecifiedSize = false) : kind{Kind::ARRAY_T}, arrayTy{elemTy, unspecifiedSize, false, {size}} {}
-   Base(TY elemTy, emitter_ssa_t* size, bool unspecifiedSize = false) : kind{Kind::ARRAY_T}, arrayTy{elemTy, unspecifiedSize, true, {size}} {}
+   Base(TY elemTy, iconst_t* size, bool unspecifiedSize = false) : kind{Kind::ARRAY_T}, arrayTy{elemTy, unspecifiedSize, false, {.fixedSize = size}} {}
+   Base(TY elemTy, ssa_t* size, bool unspecifiedSize = false) : kind{Kind::ARRAY_T}, arrayTy{elemTy, unspecifiedSize, true, {.valueRef = size}} {}
 
    // function type
    // todo: replace with move
@@ -99,7 +100,7 @@ struct Base {
 #include "defs/types.def"
 #undef ENUM_AS_STRING
       };
-      if ((kind < Kind::FLOAT || (kind >= Kind::DECIMAL32 && kind <= Kind::DECIMAL128)) && unsingedTy) {
+      if ((kind < Kind::FLOAT || (kind >= Kind::DECIMAL32 && kind <= Kind::DECIMAL128)) && signedness == Signedness::UNSIGNED) {
          ss << "unsigned ";
       }
       if (kind < Kind::NULLPTR_T) {
@@ -112,6 +113,13 @@ struct Base {
                ptrTy.base().strImpl(ss);
                break;
             case Kind::ARRAY_T:
+               arrayTy.elemTy.base().strImpl(ss);
+               if (arrayTy.varSize) {
+                  ss << "[]";
+               } else {
+                  ss << '[' << arrayTy.fixedSize << ']';
+               }
+               break;
             case Kind::STRUCT_T:
             case Kind::UNION_T:
             case Kind::ENUM_T:
@@ -175,16 +183,16 @@ struct Base {
       bool unspecifiedSize;
       bool varSize;
       union {
-         size_t fixedSize;
+         iconst_t* fixedSize;
          // See also Example 5 in section 6.7.9.
-         emitter_ssa_t* valueRef;
+         ssa_t* valueRef;
       };
    };
 
    Kind kind;
    emitter_ty_t* ref = nullptr;
    union {
-      bool unsingedTy;
+      Signedness signedness;
       TY ptrTy;
       StructOrUnionTy structOrUnionTy;
       EnumTy enumTy;
@@ -253,7 +261,7 @@ Base<_EmitterT>& Base<_EmitterT>::operator=(Base&& other) {
          arrayTy = other.arrayTy;
          break;
       default:
-         unsingedTy = other.unsingedTy;
+         signedness = other.signedness;
          break;
    }
 
@@ -278,7 +286,7 @@ bool Base<_EmitterT>::operator==(const Base& other) const {
       case Kind::DECIMAL32:
       case Kind::DECIMAL64:
       case Kind::DECIMAL128:
-         return unsingedTy == other.unsingedTy;
+         return signedness == other.signedness;
       case Kind::BOOL:
       case Kind::NULLPTR_T:
       case Kind::VOID:
@@ -312,7 +320,7 @@ int Base<_EmitterT>::rank() const {
       // todo: (jr) how to handle this?
       return -1;
    }
-   assert(kind <= Kind::DECIMAL128 && "Invalid Base::Kind to rank()");
+   assert(kind >= Kind::BOOL && kind <= Kind::LONGLONG && kind != Kind::COMPLEX && "Invalid Base::Kind to rank()");
 
    return static_cast<int>(kind);
 }
@@ -329,7 +337,15 @@ void Base<_EmitterT>::populateEmitterType(_EmitterT& emitter) {
    } else if (kind == Kind::FN_T) {
       ref = emitter.emitFnTy(fnTy.retTy, fnTy.paramTys, fnTy.isVarArg);
       return;
-   } // todo: struct, union, enum
+   } else if (kind == Kind::ARRAY_T) {
+      if (arrayTy.varSize) {
+         ref = arrayTy.elemTy.emitterType();
+      } else {
+         ref = emitter.emitArrayTy(arrayTy.elemTy, arrayTy.fixedSize);
+      }
+      return;
+   }
+   // todo: struct, union, enum
 
    switch (kind) {
       case Kind::BOOL:
