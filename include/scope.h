@@ -69,10 +69,11 @@ struct ScopeInfo {
 
    ScopeInfo() = default;
    ScopeInfo(TY ty) : ty{ty}, ssa{nullptr} {}
-   ScopeInfo(TY ty, ssa_t* ssa) : ty{ty}, ssa{ssa} {}
-   ScopeInfo(TY ty, fn_t* fn) : ty{ty}, fn{fn} {}
+   ScopeInfo(TY ty, ssa_t* ssa, bool hasDefOrInit) : ty{ty}, hasDefOrInit{hasDefOrInit}, ssa{ssa} {}
+   ScopeInfo(TY ty, fn_t* fn, bool hasDefOrInit) : ty{ty}, hasDefOrInit{hasDefOrInit}, fn{fn} {}
 
    TY ty;
+   bool hasDefOrInit;
    union {
       ssa_t* ssa;
       fn_t* fn;

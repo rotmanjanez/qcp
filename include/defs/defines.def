@@ -1,3 +1,7 @@
+#undef NAMED_ENUM_ENTRY
+#undef ENUM_ENTRY
+#undef ENUM_END
+
 #ifdef ENUM_AS_STRING
 #define NAMED_ENUM_ENTRY(name, repr) repr,
 #define ENUM_ENTRY(name) #name,

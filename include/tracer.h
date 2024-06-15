@@ -24,7 +24,7 @@ class Tracer {
 
    // Function to print the current indentation and branching
    void printIndent(bool normalLog = true) {
-      if (indent > 20) {
+      if (indent > 40) {
          // todo: remove
          throw std::runtime_error("Indentation limit reached");
       }
