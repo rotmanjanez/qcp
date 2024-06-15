@@ -7,8 +7,8 @@
 #include "type.h"
 #include "typefactory.h"
 // ---------------------------------------------------------------------------
-#include <variant>
-#include <vector>
+#include <span>
+#include <string>
 // ---------------------------------------------------------------------------
 namespace {
 // ---------------------------------------------------------------------------
@@ -162,6 +162,10 @@ typename LLVMEmitter::const_or_iconst_t toQCPConstant(llvm::Constant* val) {
    return val;
 }
 // ---------------------------------------------------------------------------
+llvm::Constant* llvmUint23T(llvm::LLVMContext& Ctx, uint32_t val) {
+   return llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), val);
+}
+// ---------------------------------------------------------------------------
 } // namespace
 // ---------------------------------------------------------------------------
 namespace qcp {
@@ -189,6 +193,7 @@ typename LLVMEmitter::ty_t* LLVMEmitter::emitPtrTo(TY ty) {
 // ---------------------------------------------------------------------------
 typename LLVMEmitter::ty_t* LLVMEmitter::emitFnTy(TY retTy, std::vector<TY> argTys, bool isVarArg) {
    std::vector<ty_t*> emitterArgTys;
+   emitterArgTys.reserve(argTys.size());
    for (auto& argTy : argTys) {
       emitterArgTys.push_back(argTy.emitterType());
    }
@@ -197,6 +202,15 @@ typename LLVMEmitter::ty_t* LLVMEmitter::emitFnTy(TY retTy, std::vector<TY> argT
 // ---------------------------------------------------------------------------
 typename LLVMEmitter::ty_t* LLVMEmitter::emitArrayTy(TY ty, iconst_t* size) {
    return llvm::ArrayType::get(ty.emitterType(), size->getZExtValue());
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ty_t* LLVMEmitter::emitStructTy(const std::vector<TY>& tys, Ident name) {
+   std::vector<ty_t*> llvmTys;
+   llvmTys.reserve(tys.size());
+   for (const auto& ty : tys) {
+      llvmTys.push_back(ty.emitterType());
+   }
+   return llvm::StructType::create(Ctx, llvmTys, static_cast<std::string>(name));
 }
 // ---------------------------------------------------------------------------
 typename LLVMEmitter::ssa_t* LLVMEmitter::emitUndef() {
@@ -391,7 +405,8 @@ typename LLVMEmitter::const_or_iconst_t LLVMEmitter::emitConstCast([[maybe_unuse
       case qcp::type::Cast::UITOFP:
       case qcp::type::Cast::SITOFP:
       default:
-         assert(false && "Invalid cast");
+         throw std::runtime_error("Invalid cast");
+         // todo: assert(false && "Invalid cast");
    }
 }
 // ---------------------------------------------------------------------------
@@ -411,6 +426,7 @@ typename LLVMEmitter::ssa_t* LLVMEmitter::emitCall(bb_t* bb, TY fnTy, ssa_t* fnP
 // ---------------------------------------------------------------------------
 typename LLVMEmitter::ssa_t* LLVMEmitter::emitCall(bb_t* bb, llvm::FunctionCallee fn, const std::vector<value_t>& args, Ident name) {
    std::vector<llvm::Value*> emitterArgs;
+   emitterArgs.reserve(args.size());
    for (auto& arg : args) {
       emitterArgs.push_back(asLLVMValue(arg));
    }
@@ -423,9 +439,24 @@ typename LLVMEmitter::iconst_t* LLVMEmitter::sizeOf(TY ty) {
 }
 // ---------------------------------------------------------------------------
 typename LLVMEmitter::ssa_t* LLVMEmitter::emitGEP(bb_t* bb, TY ty, value_t ptr, value_t idx, Ident name) {
+   return emitGEPImpl(bb, ty, asLLVMValue(ptr), {asLLVMValue(idx), nullptr, nullptr}, name);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitGEP(bb_t* bb, TY ty, value_t ptr, std::array<uint32_t, 2> idx, Ident name) {
+   return emitGEPImpl(bb, ty, asLLVMValue(ptr), {llvmUint23T(Ctx, idx[0]), llvmUint23T(Ctx, idx[1]), nullptr}, name);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitGEP(bb_t* bb, TY ty, value_t ptr, std::array<uint32_t, 3> idx, Ident name) {
+   return emitGEPImpl(bb, ty, asLLVMValue(ptr), {llvmUint23T(Ctx, idx[0]), llvmUint23T(Ctx, idx[1]), llvmUint23T(Ctx, idx[2])}, name);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitGEPImpl(bb_t* bb, TY ty, value_t ptr, std::array<ssa_t*, 3> idx, Ident name) {
    Builder.SetInsertPoint(bb);
-   std::array<llvm::Value*, 1> indices{asLLVMValue(idx)};
-   return Builder.CreateGEP(ty.getPointedToTy().emitterType(), asLLVMValue(ptr), indices, static_cast<std::string>(name).c_str());
+   llvm::ArrayRef<llvm::Value*> indices{idx[0], idx[1], idx[2]};
+   while (indices.size() > 0 && indices.back() == nullptr) {
+      indices = indices.drop_back();
+   }
+   return Builder.CreateGEP(ty.emitterType(), asLLVMValue(ptr), indices, static_cast<std::string>(name).c_str());
 }
 // ---------------------------------------------------------------------------
 typename LLVMEmitter::sw_t* LLVMEmitter::emitSwitch(bb_t* bb, value_t value) {

@@ -12,7 +12,10 @@
 #include "llvm/IR/Type.h"
 #include "stringpool.h"
 // ---------------------------------------------------------------------------
+#include <array>
 #include <iostream>
+#include <variant>
+#include <vector>
 // ---------------------------------------------------------------------------
 namespace qcp {
 // ---------------------------------------------------------------------------
@@ -65,8 +68,8 @@ class LLVMEmitter {
       Mod->print(llvm::outs(), nullptr);
    }
 
-   unsigned long long getIntegerValue(const_t* c) {
-      return static_cast<unsigned long long>(static_cast<llvm::ConstantInt*>(c)->getZExtValue());
+   unsigned long long getIntegerValue(iconst_t* c) {
+      return c->getZExtValue();
    }
 
    iconst_t* sizeOf(TY ty);
@@ -82,6 +85,8 @@ class LLVMEmitter {
    ty_t* emitPtrTo(TY ty);
 
    ty_t* emitArrayTy(TY ty, iconst_t* size);
+
+   ty_t* emitStructTy(const std::vector<TY>& tys, Ident name = Ident());
 
    ssa_t* emitUndef();
 
@@ -148,6 +153,8 @@ class LLVMEmitter {
 
    ssa_t* emitCall(bb_t* bb, TY fnTy, ssa_t* fnPtr, const std::vector<value_t>& args, Ident name = Ident());
 
+   ssa_t* emitGEP(bb_t* bb, TY ty, value_t ptr, std::array<uint32_t, 2> idx, Ident name = Ident());
+   ssa_t* emitGEP(bb_t* bb, TY ty, value_t ptr, std::array<uint32_t, 3> idx, Ident name = Ident());
    ssa_t* emitGEP(bb_t* bb, TY ty, value_t ptr, value_t idx, Ident name = Ident());
 
    sw_t* emitSwitch(bb_t* bb, value_t value);
@@ -157,6 +164,8 @@ class LLVMEmitter {
    void addSwitchDefault(sw_t* sw, bb_t* target);
 
    private:
+   ssa_t* emitGEPImpl(bb_t* bb, TY ty, value_t ptr, std::array<ssa_t*, 3> idx, Ident name);
+
    ssa_t* emitCall(bb_t* bb, llvm::FunctionCallee fn, const std::vector<value_t>& args, Ident name = Ident());
    ssa_t* emitAllocaImpl(bb_t* bb, TY ty, ssa_t* size, Ident name, bool insertAtBegin);
 
