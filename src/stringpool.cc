@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 #include "stringpool.h"
 // ---------------------------------------------------------------------------
+#include <cassert>
 #include <iostream>
 // ---------------------------------------------------------------------------
 namespace qcp {
@@ -34,7 +35,16 @@ Ident::operator bool() const {
    return tag != 0;
 }
 // ---------------------------------------------------------------------------
+bool Ident::operator==(const Ident& other) const {
+   return tag == other.tag;
+}
+// ---------------------------------------------------------------------------
+bool Ident::operator!=(const Ident& other) const {
+   return tag != other.tag;
+}
+// ---------------------------------------------------------------------------
 std::string_view StringPool::get(unsigned idx) {
+   assert(idx < strings_.size() && "StringPool::get: index out of bounds");
    return strings_[idx];
 }
 // ---------------------------------------------------------------------------
