@@ -69,6 +69,10 @@ class Tokenizer {
          return next->getKind();
       }
 
+      SrcLoc getPrevLoc() const {
+         return prevLoc_;
+      }
+
       private:
       sv_it getNumberConst(sv_it begin);
       sv_it getPunctuator(sv_it begin);
@@ -78,6 +82,7 @@ class Tokenizer {
       Token token_;
       std::string_view prog_;
       sv_it progBegin_;
+      SrcLoc prevLoc_{};
       DiagnosticTracker* diagnostics_;
    };
 
@@ -721,6 +726,7 @@ sv_it Tokenizer::const_iterator::getCCharSequence(sv_it begin) {
 }
 // ---------------------------------------------------------------------------
 Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
+   prevLoc_ = token_.getLoc();
    if (prog_.empty()) {
       token_ = Token(TK::END);
       return *this;
@@ -779,7 +785,7 @@ find_token_start:
       if (t) {
          token_ = Token{loc, *t};
       } else {
-         token_ = Token{loc, ident};
+         token_ = Token{loc, Ident(ident)};
       }
    } else if (isDigit(*begin) or (*begin == '.' and isDigit(second))) {
       requiresSeparator = true;

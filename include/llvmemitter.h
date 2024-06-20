@@ -55,8 +55,7 @@ class LLVMEmitter {
    static constexpr bool INT_HAS_64_BIT = false;
    static constexpr bool LONG_HAS_64_BIT = true;
 
-   LLVMEmitter() : Mod{new llvm::Module("qcp", Ctx)}, Builder{Ctx} {}
-   ~LLVMEmitter() { delete Mod; }
+   LLVMEmitter() : mod_{std::make_unique<llvm::Module>("qcp", Ctx)}, Mod{&*mod_}, Builder{Ctx} {}
 
    void dumpToFile(const std::string& filename) {
       std::error_code EC;
@@ -86,7 +85,7 @@ class LLVMEmitter {
 
    ty_t* emitArrayTy(TY ty, iconst_t* size);
 
-   ty_t* emitStructTy(const std::vector<TY>& tys, Ident name = Ident());
+   ty_t* emitStructTy(const std::vector<TY>& tys, bool incomplete, Ident name = Ident());
 
    ssa_t* emitUndef();
 
@@ -109,7 +108,13 @@ class LLVMEmitter {
 
    bb_t* emitBB(fn_t* fn, bb_t* insertBefore = nullptr, Ident name = Ident());
 
-   const_or_iconst_t emitConst(TY ty, long value);
+   iconst_t* emitIConst(TY ty, unsigned long value);
+
+   const_t* emitDConst(TY ty, double value);
+
+   // todo: const_t* emitConstDaraArray(TY ty, const std::vector<const_or_iconst_t>& values);
+
+   const_t* emitStringLiteral(const std::string_view str);
 
    ssa_t* emitLocalVar(fn_t* fn, bb_t* entry, TY ty, Ident name = Ident(), bool insertAtBegin = false /* TODO: this is only here so that the output is identical to clang but not necessary */);
 
@@ -170,6 +175,7 @@ class LLVMEmitter {
    ssa_t* emitAllocaImpl(bb_t* bb, TY ty, ssa_t* size, Ident name, bool insertAtBegin);
 
    llvm::LLVMContext Ctx;
+   std::unique_ptr<llvm::Module> mod_;
    llvm::Module* Mod;
    llvm::IRBuilder<> Builder;
 };

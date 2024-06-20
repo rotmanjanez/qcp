@@ -42,6 +42,7 @@ class Type {
    using Base = Base<_EmitterT>;
    using TypeFactory = TypeFactory<_EmitterT>;
    using Token = token::Token;
+   using ty_t = typename _EmitterT::ty_t;
 
    template <typename T>
    friend std::ostream& operator<<(std::ostream& os, const Type<T>& ty);
@@ -52,9 +53,10 @@ class Type {
 
    explicit Type(std::pair<unsigned short, std::vector<Base>&> ini) : index_{ini.first}, types_{&ini.second} {}
 
-   explicit Type(std::vector<Base>& types, unsigned short index) : index_{index}, types_{&types} {}
+   Type(std::vector<Base>& types, unsigned short index) : index_{index}, types_{&types} {}
 
    public:
+   // todo: change to bit flags
    struct Qualifiers {
       bool operator==(const Qualifiers& other) const = default;
       bool operator!=(const Qualifiers& other) const = default;
@@ -74,103 +76,6 @@ class Type {
    Type& operator=(const Type& other) = default;
    Type& operator=(Type&& other) = default;
 
-   bool isBoolTy() const {
-      return kind() == Kind::BOOL;
-   }
-
-   bool isIntegerTy() const {
-      // todo: enum types
-      switch (kind()) {
-         case Kind::CHAR:
-         case Kind::SHORT:
-         case Kind::INT:
-         case Kind::LONG:
-         case Kind::LONGLONG:
-            return true;
-         default:
-            return false;
-      }
-   }
-
-   bool isFloatingTy() const {
-      switch (kind()) {
-         case Kind::FLOAT:
-         case Kind::DOUBLE:
-         case Kind::LONGDOUBLE:
-            return true;
-         default:
-            return false;
-      }
-   }
-
-   bool isDecimalTy() const {
-      switch (kind()) {
-         case Kind::DECIMAL32:
-         case Kind::DECIMAL64:
-         case Kind::DECIMAL128:
-            return true;
-         default:
-            return false;
-      }
-   }
-
-   bool isRealFloatingTy() const {
-      return isFloatingTy() || isDecimalTy();
-   }
-
-   bool isBasicTy() const {
-      return isRealFloatingTy() || isIntegerTy() || kind() == Kind::CHAR;
-   }
-
-   int rank() const {
-      return base().rank();
-   }
-
-   bool isCharacterTy() const {
-      return kind() == Kind::CHAR;
-   }
-
-   bool isArithmeticTy() const {
-      return isIntegerTy() || isRealFloatingTy(); // todo: this is wrong
-   }
-
-   bool isCompleteType() const {
-      switch (kind()) {
-         case Kind::VOID:
-            return false;
-         default:
-            return true;
-      }
-   }
-
-   bool isScalarTy() const {
-      return isArithmeticTy() || isPointerTy() || kind() == Kind::NULLPTR_T;
-   }
-
-   bool isAggregateTy() const {
-      return kind() == Kind::STRUCT_T || kind() == Kind::ARRAY_T;
-   }
-
-   bool isPointerTy() const {
-      return base().kind == Kind::PTR_T;
-   }
-
-   bool isSignedTy() const {
-      return base().signedness == Signedness::SIGNED;
-   }
-
-   bool isSignedCharlikeTy() const {
-      return isCharacterTy() && (isSignedTy() || (base().signedness == Signedness::UNSPECIFIED && _EmitterT::CHAR_IS_SIGNED));
-   }
-
-   bool variablyModified() const {
-      return base().variablyModified();
-   }
-
-   bool isVarArg() const {
-      return kind() == Kind::FN_T && base().fnTy.isVarArg;
-   }
-
    static Type discardQualifiers(const Type& other) {
       Type ty{other};
       ty.qualifiers = {};
@@ -183,7 +88,7 @@ class Type {
       return ty;
    }
 
-   void addQualifier(token::Kind kind) {
+   Type& addQualifier(token::Kind kind) {
       switch (kind) {
          case token::Kind::CONST:
             qualifiers.CONST = true;
@@ -201,51 +106,32 @@ class Type {
             assert(false && "Invalid token::Kind to qualify Type with");
             break;
       }
+      return *this;
    }
 
-   Kind kind() const {
-      return base().kind;
-   }
+   bool operator==(const Type& other) const = default;
+   bool operator!=(const Type& other) const = default;
 
-   Type getRetTy() const {
-      return base().fnTy.retTy;
-   }
-
-   const std::vector<Type>& getParamTys() const {
-      return base().fnTy.paramTys;
-   }
-
-   Type getElemTy() const {
-      return base().arrayTy.elemTy;
-   }
-
-   Type getPointedToTy() const {
-      return base().ptrTy;
-   }
-
-   const std::vector<TaggedType<_EmitterT>>& getMembers() const {
-      return base().structOrUnionTy.members;
-   }
-
-   const Base& base() const {
-      assert(types_ && "Type is not initialized");
-      return (*types_)[index_];
-   }
-
-   typename _EmitterT::ty_t* emitterType() const {
-      return base().ref;
-   }
-
-   bool operator==(const Type& other) const {
-      return qualifiers == other.qualifiers && index_ == other.index_;
-   }
-
-   auto operator<=>(const Type& other) const {
-      return base().rank() <=> other.base().rank();
+   // todo: change to partial ordering
+   std::strong_ordering operator<=>(const Type& other) const {
+      return **this <=> *other;
    }
 
    operator bool() const {
       return index_ != 0 && types_ != nullptr;
+   }
+
+   operator ty_t*() const {
+      return static_cast<ty_t*>(**this);
+   }
+
+   const Base* operator->() const {
+      return &**this;
+   }
+
+   const Base& operator*() const {
+      assert(types_ && "Type is not initialized");
+      return (*types_)[index_];
    }
 
    Qualifiers qualifiers;
@@ -259,6 +145,8 @@ class Type {
 template <typename _EmitterT>
 struct TaggedType {
    using Type = Type<_EmitterT>;
+   using Base = Base<_EmitterT>;
+   using ty_t = typename _EmitterT::ty_t;
 
    TaggedType(const TaggedType& other) = default;
    TaggedType(TaggedType&& other) = default;
@@ -268,15 +156,27 @@ struct TaggedType {
    TaggedType(Ident name, Type ty) : name{name}, ty{ty} {}
 
    bool operator==(const TaggedType& other) const {
-      return ty == other.ty;
+      return ty == other.ty && name == other.name;
    }
 
    auto operator<=>(const TaggedType& other) const {
-      return ty <=> other.ty;
+      return ty <=> other.ty == 0 ? name <=> other.name : ty <=> other.ty;
    }
 
    operator bool() const {
       return ty;
+   }
+
+   const Base* operator->() const {
+      return &**this;
+   }
+
+   const Base& operator*() const {
+      return *ty;
+   }
+
+   operator ty_t*() const {
+      return static_cast<ty_t*>(ty);
    }
 
    template <typename T>
@@ -311,7 +211,7 @@ std::ostream& operator<<(std::ostream& os, const Type<_EmitterT>& ty) {
    // todo: if (ty.qualifiers.ATOMIC) {
    // todo:    os << "_Atomic ";
    // todo: }
-   os << ty.base();
+   os << *ty;
    return os;
 }
 // ---------------------------------------------------------------------------

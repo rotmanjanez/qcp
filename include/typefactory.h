@@ -24,15 +24,19 @@ class TypeFactory {
    using ssa_t = typename _EmitterT::ssa_t;
    using iconst_t = typename _EmitterT::iconst_t;
    using Token = token::Token;
+   using ty_t = typename _EmitterT::ty_t;
 
    public:
-   TypeFactory(emitter_t& emitter) : emitter{emitter}, types(5), typeFragments(1) {
-      types[1] = Base{Kind::BOOL};
-      types[2] = Base{Kind::INT, SIGNED};
-      types[3] = Base{Kind::INT, UNSIGNED};
-      types[4] = Base{Kind::LONGLONG, UNSIGNED};
+   TypeFactory(emitter_t& emitter) : emitter{emitter}, types(8), typeFragments(1) {
+      types[1] = Base(Kind::VOID);
+      types[2] = Base(Kind::BOOL);
+      types[3] = Base(Kind::CHAR);
+      types[4] = Base(Kind::INT, SIGNED);
+      types[5] = Base(Kind::INT, UNSIGNED);
+      types[6] = Base(Kind::LONGLONG, UNSIGNED);
+      types[7] = Base(charTy().addQualifier(token::Kind::CONST));
       for (auto it = types.begin() + 1; it != types.end(); ++it) {
-         it->populateEmitterType(emitter);
+         it->populateEmitterType(*this, emitter);
       }
    }
 
@@ -42,30 +46,37 @@ class TypeFactory {
    }
 
    // returns a already hardened type
+   TY voidTy() {
+      return TY{types, 1};
+   }
+
+   // returns a already hardened type
    TY boolTy() {
-      return TY{types, static_cast<unsigned short>(1)};
+      return TY{types, static_cast<unsigned short>(2)};
+   }
+
+   // returns a already hardened type
+   TY charTy() {
+      return TY{types, static_cast<unsigned short>(3)};
    }
 
    // returns a already hardened type
    TY sizetTy() {
-      return TY{types, static_cast<unsigned short>(4)};
+      return TY{types, static_cast<unsigned short>(6)};
    }
 
    // returns a already hardened type
    TY intTy(bool unsignedTy) {
-      return TY{types, static_cast<unsigned short>(2 + unsignedTy)};
+      return TY{types, static_cast<unsigned short>(4 + unsignedTy)};
    }
 
-   TY voidTy() {
-      return TY{construct(Kind::VOID)};
+   // returns a already hardened type
+   TY constCharPtrTy() {
+      return TY{types, static_cast<unsigned short>(7)};
    }
 
    TY integralTy(Kind integerKind, bool unsignedTy) {
       return TY{construct(integerKind, unsignedTy)};
-   }
-
-   TY charTy() {
-      return TY{construct(Kind::CHAR)};
    }
 
    TY realTy(Kind realKind) {
@@ -127,8 +138,8 @@ class TypeFactory {
    }
 
    TY promote(TY ty) {
-      if (ty.base().rank() < static_cast<int>(Kind::INT)) {
-         return intTy(!ty.isSignedTy());
+      if (ty->rank() < static_cast<int>(Kind::INT)) {
+         return intTy(!ty->isSignedTy());
       }
       // todo: aother probotions: eg bit field
       return ty;
@@ -136,65 +147,42 @@ class TypeFactory {
 
    class DeclTypeBaseRef {
       public:
-      DeclTypeBaseRef() : derivedFrom_{0} {}
-      DeclTypeBaseRef(const TY& ty) : derivedFrom_{ty.index_}, types_{ty.types_} {}
+      DeclTypeBaseRef() : ty{} {}
+      DeclTypeBaseRef(const TY& ty) : ty{ty} {}
 
-      TY& operator*() const {
-         Base& base = derivedFrom();
-         switch (base.kind) {
-            case Kind::PTR_T:
-               return base.ptrTy;
-            case Kind::ARRAY_T:
-               return base.arrayTy.elemTy;
-            case Kind::ENUM_T:
-               return base.enumTy.underlyingType;
-            case Kind::FN_T:
-               return base.fnTy.retTy;
-            default:
-               std::cerr << "Invalid Base::Kind to dereference: " << base << "\n";
-               assert(false && "Invalid Base::Kind to dereference\n");
+      TY& operator*() {
+         TY* derivedFrom = (*ty.types_)[ty.index_].derivedFrom();
+         if (!derivedFrom) {
+            std::cerr << "Type '" << ty << "' is not derived from another type" << std::endl;
+            assert(false && "Type is not derived from another type");
          }
-         // todo: what to return here?
-      }
-
-      TY* operator->() const {
-         return &**this;
+         return *derivedFrom;
       }
 
       void chain(TY ty) {
-         DeclTypeBaseRef& _this = *this;
+         DeclTypeBaseRef& this_ = *this;
 
-         if (_this) {
-            *_this = ty;
-            _this = DeclTypeBaseRef(*_this);
+         if (this_) {
+            *this_ = ty;
+            this_ = DeclTypeBaseRef(*this_);
          } else {
-            _this = DeclTypeBaseRef(ty);
+            this_ = DeclTypeBaseRef(ty);
          }
       }
 
       operator bool() const {
-         if (derivedFrom_ == 0) {
-            return false;
-         }
-         Base& base = derivedFrom();
-
-         return base.kind < Kind::UNION_T && base.kind > Kind::NULLPTR_T && base.kind != Kind::END;
+         return ty && ty->derivedFrom();
       }
 
       private:
-      Base& derivedFrom() const {
-         return (*types_)[derivedFrom_];
-      }
-
-      unsigned short derivedFrom_;
-      std::vector<Base>* types_;
+      TY ty;
    };
 
    template <typename... Args>
    std::pair<unsigned short, std::vector<Base>&> construct(Args... args);
 
-   TY harden(TY ty) {
-      if (!ty || ty.emitterType()) {
+   TY harden(TY ty, TY* completesTy = nullptr) {
+      if (!ty || static_cast<ty_t*>(ty)) {
          return ty;
       }
 
@@ -204,18 +192,30 @@ class TypeFactory {
       }
 
       // check if there is already a type with the same base
-      auto it = std::find(types.begin(), types.end(), ty.base());
+      auto it = std::find(types.begin(), types.end(), *ty);
       if (it != types.end()) {
+         assert(!completesTy && "completesTy should be nullptr if type is already hardened");
          ty.index_ = std::distance(types.begin(), it);
          ty.types_ = &types;
          return ty;
       }
-
-      types.emplace_back(std::move(typeFragments[ty.index_]));
-      ty.index_ = types.size() - 1;
-      ty.types_ = &types;
-      types[ty.index_].populateEmitterType(emitter);
-      return ty;
+      if (completesTy) {
+         assert(false && "not implemented yet");
+         // if (completesTy->types_ == &types) {
+         //    // types[completesTy->index_] = std::move(typeFragments[ty.index_]);
+         //    ty.index_ = completesTy->index_;
+         // } else {
+         //    completesTy->types_->emplace_back(std::move(typeFragments[ty.index_]));
+         //    completesTy->index_ = ty.index_ = completesTy->types_->size() - 1;
+         //    completesTy->types_ = &types;
+         // }
+         // ty.types_ = &types;
+         return ty;
+      } else {
+         types.emplace_back(std::move(typeFragments[ty.index_]));
+         types.back().populateEmitterType(*this, emitter);
+         return {TY(types, types.size() - 1)};
+      }
    }
 
    void clearFragments() {
@@ -237,7 +237,7 @@ class TypeFactory {
 
       const TY& higher = lhs > rhs ? lhs : rhs;
 
-      if (higher.base().kind >= Kind::FLOAT) {
+      if (higher->kind() >= Kind::FLOAT) {
          return higher;
       }
       // todo: enums
@@ -249,10 +249,10 @@ class TypeFactory {
 
       if (lhs == rhs) {
          return lhs;
-      } else if (lhs.isSignedTy() == rhs.isSignedTy()) {
+      } else if (lhs->isSignedTy() == rhs->isSignedTy()) {
          return lhs > rhs ? lhs : rhs;
       } else {
-         if (lhs.isSignedTy()) {
+         if (lhs->isSignedTy()) {
             std::swap(lhs, rhs);
          }
          // now, lhs is unsigned and rhs is signed
@@ -261,7 +261,7 @@ class TypeFactory {
          } else {
             // todo: check if representable
             // signed long long + unsigned long -> unsigned long long (wenn beide 64 bit)
-            TY crt{construct(rhs.kind(), UNSIGNED)};
+            TY crt{construct(rhs->kind(), UNSIGNED)};
             return harden(crt);
          }
       }

@@ -9,24 +9,27 @@
 namespace qcp {
 // ---------------------------------------------------------------------------
 struct SrcLoc {
-   std::size_t loc;
-   unsigned len;
+   using loc_off_t = long long;
+   using loc_len_t = unsigned;
+
+   loc_off_t loc;
+   loc_len_t len;
 
    using sv_it = typename std::string_view::const_iterator;
 
    SrcLoc() : loc{0}, len{0} {}
-   SrcLoc(std::size_t loc, unsigned len) : loc{loc}, len{len} {}
-   SrcLoc(std::size_t loc, std::size_t locEnd) : loc{loc}, len{static_cast<unsigned int>(locEnd - loc)} {}
-   SrcLoc(sv_it progBegin, sv_it begin, sv_it end) : loc{static_cast<std::size_t>(begin - progBegin)}, len{static_cast<unsigned int>(end - begin)} {}
+   SrcLoc(loc_off_t loc, unsigned len = 0) : loc{loc}, len{len} {}
+   SrcLoc(loc_off_t loc, loc_off_t locEnd) : loc{loc}, len{static_cast<loc_len_t>(locEnd - loc)} {}
+   SrcLoc(sv_it progBegin, sv_it begin, sv_it end) : loc{std::distance(progBegin, begin)}, len{static_cast<loc_len_t>(std::distance(begin, end))} {}
 
-   std::size_t locEnd() const {
+   loc_off_t locEnd() const {
       return loc + len;
    }
 
    // idea from aengelke
    SrcLoc operator|(const SrcLoc& other) const {
-      std::size_t newLoc{std::min(loc, other.loc)};
-      return {newLoc, std::max(locEnd(), static_cast<unsigned int>(other.locEnd()) - newLoc)};
+      loc_off_t newLoc{std::min(loc, other.loc)};
+      return {newLoc, std::max(locEnd(), other.locEnd() - newLoc)};
    }
 
    SrcLoc& operator|=(const SrcLoc& other) {

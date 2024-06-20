@@ -18,10 +18,16 @@ class DiagnosticTracker;
 // ---------------------------------------------------------------------------
 class DiagnosticMessage {
    public:
-   explicit DiagnosticMessage(const DiagnosticTracker& tracker, std::string message) : tracker_{tracker}, message_{std::move(message)}, loc_{} {}
+   enum class Kind {
+      INFO,
+      WARNING,
+      ERROR,
+   };
+
+   explicit DiagnosticMessage(const DiagnosticTracker& tracker, std::string message, Kind kind = Kind::ERROR) : tracker_{tracker}, kind{kind}, message_{std::move(message)}, loc_{} {}
 
    template <typename T>
-   DiagnosticMessage(const DiagnosticTracker& tracker, T message, SrcLoc loc) : tracker_{tracker}, message_{std::forward<T>(message)}, loc_{loc} {}
+   DiagnosticMessage(const DiagnosticTracker& tracker, T message, SrcLoc loc, Kind kind = Kind::ERROR) : tracker_{tracker}, kind{kind}, message_{std::forward<T>(message)}, loc_{loc} {}
 
    friend std::ostream& operator<<(std::ostream& os, const DiagnosticMessage& diag);
 
@@ -33,9 +39,12 @@ class DiagnosticMessage {
       return loc_.value();
    }
 
+   std::size_t line() const;
+   std::size_t column() const;
+
    private:
    const DiagnosticTracker& tracker_;
-   std::string_view prog_;
+   Kind kind;
    std::string message_;
    std::optional<SrcLoc> loc_;
 };
@@ -44,9 +53,11 @@ std::ostream& operator<<(std::ostream& os, const DiagnosticMessage& diag);
 // ---------------------------------------------------------------------------
 class DiagnosticTracker {
    friend std::ostream& operator<<(std::ostream& os, const DiagnosticTracker& tracker);
+   friend std::ostream& operator<<(std::ostream& os, const DiagnosticMessage& diag);
+   friend class DiagnosticMessage;
    // todo: (jr) make this a singleton and change methods to static
    public:
-   explicit DiagnosticTracker(std::string_view prog) : prog_{prog} {}
+   DiagnosticTracker(std::string filename, std::string_view prog) : filename{std::move(filename)}, prog_{prog} {}
 
    void report(DiagnosticMessage diag) {
       diagnostics_.push_back(diag);
@@ -60,7 +71,10 @@ class DiagnosticTracker {
       return diagnostics_.empty();
    }
 
-   void registerLineBreak(std::size_t pos) {
+   void registerLineBreak(long long pos) {
+      if (pos == lineBreaks_.back()) {
+         return; // todo: this is only neccesary because operator++ may be called multiple times for a token. this should be removed.
+      }
       lineBreaks_.push_back(pos);
    }
 
@@ -70,39 +84,30 @@ class DiagnosticTracker {
       return *this;
    }
 
-   DiagnosticTracker& operator<<(std::ostream& (*pf)(std::ostream&) ) {
-      pf(os_);
-      if (pf == static_cast<std::ostream& (*) (std::ostream&)>(std::endl)) {
-         DiagnosticMessage diag{*this, os_.str(), loc_};
-         report(diag);
-         os_.clear();
-         loc_ = {};
-      }
-      return *this;
-   }
+   DiagnosticTracker& operator<<(std::ostream& (*pf)(std::ostream&) );
 
    const std::string_view getSource(const SrcLoc& loc) const {
       return prog_.substr(loc.loc, loc.len);
    }
 
-   std::string_view getSourceLine(const SrcLoc& loc) const {
-      auto lineBegin = std::lower_bound(lineBreaks_.begin(), lineBreaks_.end(), loc.loc) - 1;
-      auto newLine = std::find(prog_.begin() + *lineBegin + 1, prog_.end(), '\n');
-      auto line = prog_.substr(*lineBegin + 1, newLine - prog_.begin() - *lineBegin);
-      // todo: use upper_bound to find the end of the line
-      return line;
-   }
+   std::string getSourceLine(const SrcLoc& loc) const;
 
    DiagnosticTracker& operator<<(SrcLoc loc) {
       loc_ = loc;
       return *this;
    }
 
+   void unsilence() {
+      silenced = false;
+   }
+
    private:
    std::stringstream os_{};
    SrcLoc loc_{};
    std::vector<DiagnosticMessage> diagnostics_{};
-   std::vector<std::size_t> lineBreaks_{};
+   std::vector<long long> lineBreaks_{-1}; // first linebreak is right before the first character
+   bool silenced = false;
+   std::string filename;
    std::string_view prog_;
 };
 // ---------------------------------------------------------------------------

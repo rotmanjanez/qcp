@@ -33,7 +33,7 @@ int main(int argc, char* argv[]) {
    std::cout << code << std::endl;
 
    // Call your parser
-   qcp::DiagnosticTracker diag{code};
+   qcp::DiagnosticTracker diag{argv[1], code};
    Parser parser{code, diag};
    parser.parse();
    parser.getEmitter().dumpToStdout();

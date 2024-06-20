@@ -31,6 +31,9 @@ class Ident {
    operator std::string() const;
    operator bool() const;
 
+   bool operator==(const Ident& other) const;
+   bool operator!=(const Ident& other) const;
+
    // stringlike template
    template <typename T>
    Ident operator+(T rhs) const {

@@ -65,7 +65,8 @@ class Token {
    Token(SrcLoc loc, long value) : type{Kind::L_ICONST}, value{value}, loc_{loc} {}
    Token(SrcLoc loc, int value) : type{Kind::ICONST}, value{value}, loc_{loc} {}
 
-   Token(SrcLoc loc, std::string_view value, Kind type = Kind::IDENT) : type{type}, ident{value}, loc_{loc} {}
+   Token(SrcLoc loc, std::string_view value, Kind type) : type{type}, sliteral{value}, loc_{loc} {}
+   Token(SrcLoc loc, Ident id, Kind type = Kind::IDENT) : type{type}, ident{id}, loc_{loc} {}
 
    explicit Token(Kind type) : type{type}, loc_{} {}
    Token(SrcLoc loc, Kind type) : type{type}, loc_{loc} {}
@@ -108,6 +109,8 @@ class Token {
          return value.i;
       } else if constexpr (std::is_same_v<T, Ident>) {
          return ident;
+      } else if constexpr (std::is_same_v<T, std::string_view>) {
+         return sliteral;
       } else {
          assert(false && "Unsupported type");
       }
@@ -125,6 +128,7 @@ class Token {
    Kind type;
    union {
       Ident ident;
+      std::string_view sliteral;
       ConstExprValue value;
    };
    SrcLoc loc_;
