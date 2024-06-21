@@ -1,1 +1,0 @@
-int foo(int arg) {} // Error: end of non void function
