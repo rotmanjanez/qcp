@@ -3,9 +3,9 @@
 // ---------------------------------------------------------------------------
 // qcp
 // ---------------------------------------------------------------------------
+#include "emittertraits.h"
 #include "operator.h"
 #include "token.h"
-#include "type.h"
 // ---------------------------------------------------------------------------
 #include <algorithm>
 #include <compare>
@@ -13,15 +13,15 @@
 #include <variant>
 #include <vector>
 // ---------------------------------------------------------------------------
+#define VARIANT_ACCESS_METHODS(name, type, member) \
+   type& name() { return std::get<type>(data_); }  \
+   const type& name() const { return std::get<type>(data_); }
+// ---------------------------------------------------------------------------
 namespace qcp {
 namespace type {
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
 class TypeFactory;
-// ---------------------------------------------------------------------------
-#define VARIANT_ACCESS_METHODS(name, type, member) \
-   type& name() { return std::get<type>(data_); }  \
-   const type& name() const { return std::get<type>(data_); }
 // ---------------------------------------------------------------------------
 // todo: _BitInt(N)
 // todo: _Complex float
@@ -32,7 +32,7 @@ class TypeFactory;
 // todo: _Imaginary long double
 template <typename _EmitterT>
 struct Base {
-   using TY = Type<_EmitterT>;
+   using Type = Type<_EmitterT>;
    using TaggedTY = TaggedType<_EmitterT>;
    using ty_t = typename _EmitterT::ty_t;
    using ssa_t = typename _EmitterT::ssa_t;
@@ -59,20 +59,23 @@ struct Base {
    }
 
    // pointer type
-   Base(TY ptrTy) : kind_{Kind::PTR_T}, data_{ptrTy} {}
+   explicit Base(Type ptrTy) : kind_{Kind::PTR_T}, data_{ptrTy} {}
 
    // array type
-   Base(TY elemTy, iconst_t* size, bool unspecifiedSize = false) : kind_{Kind::ARRAY_T}, data_{ArrayTy{elemTy, unspecifiedSize, size}} {}
-   Base(TY elemTy, ssa_t* size, bool unspecifiedSize = false) : kind_{Kind::ARRAY_T}, data_{ArrayTy{elemTy, unspecifiedSize, size}} {}
+   Base(Type elemTy, std::size_t size, bool unspecifiedSize = false) : kind_{Kind::ARRAY_T}, data_{ArrayTy{elemTy, unspecifiedSize, size}} {}
+   Base(Type elemTy, ssa_t* size, bool unspecifiedSize = false) : kind_{Kind::ARRAY_T}, data_{ArrayTy{elemTy, unspecifiedSize, size}} {}
 
    // function type
    // todo: replace with move
-   Base(TY retTy, const std::vector<TY>& paramTys, bool isVarArg) : kind_{Kind::FN_T}, data_{FnTy{paramTys, retTy, isVarArg}} {}
+   Base(Type retTy, const std::vector<Type>& paramTys, bool isVarArgFnTy) : kind_{Kind::FN_T}, data_{FnTy{paramTys, retTy, isVarArgFnTy}} {}
 
    // Struct or Union type
    Base(token::Kind tk, std::vector<TaggedTY> members, bool incomplete, Ident tag) : kind_{tk == token::Kind::STRUCT ? Kind::STRUCT_T : Kind::UNION_T}, data_{StructOrUnionTy{incomplete, tag, members}} {
       assert(tk == token::Kind::STRUCT || tk == token::Kind::UNION && "Invalid token::Kind for struct or union");
    }
+
+   // Enum type
+   Base(Type underlyingType, Ident tag) : kind_{Kind::ENUM_T}, data_{EnumTy{tag, underlyingType}} {}
 
    Base(const Base&) = default;
    Base(Base&&) = default;
@@ -91,7 +94,8 @@ struct Base {
 
    int rank() const;
 
-   bool variablyModified() const;
+   bool isVoidTy() const { return kind_ == Kind::VOID; }
+   bool isVariablyModifiedTy() const;
    bool isBoolTy() const;
    bool isIntegerTy() const;
    bool isFloatingTy() const;
@@ -100,19 +104,87 @@ struct Base {
    bool isBasicTy() const;
    bool isCharacterTy() const;
    bool isArithmeticTy() const;
-   bool isCompleteType() const;
+   bool isCompleteTy() const;
    bool isScalarTy() const;
    bool isAggregateTy() const;
    bool isPointerTy() const;
    bool isSignedTy() const;
    bool isSignedCharlikeTy() const;
-   bool isVarArg() const;
+   bool isVarArgFnTy() const;
+   bool isFixedSizeArrayTy() const;
+   bool isArrayTy() const;
+   bool isUnionTy() const;
+   bool isFnTy() const;
+   bool isStructTy() const;
+   bool isEnumTy() const;
 
-   TY getRetTy() const;
-   const std::vector<TY>& getParamTys() const;
-   TY getElemTy() const;
-   TY getPointedToTy() const;
+   Ident getTag() const {
+      if (kind_ == Kind::STRUCT_T || kind_ == Kind::UNION_T) {
+         return structOrUnionTy().tag;
+      }
+      return Ident();
+   }
+
+   bool isCompatibleWith(const Base& other) const {
+      if (kind_ == Kind::END || other.kind_ == Kind::END) {
+         return false;
+      }
+      if (isIntegerTy() && other.isIntegerTy()) {
+         return signedness() == other.signedness(); // todo: how to handle char here?
+      }
+      if (kind_ != other.kind_) {
+         return false;
+      }
+
+      if (kind_ == Kind::PTR_T) {
+         return getPointedToTy().isCompatibleWith(other.getPointedToTy());
+      } else if (kind_ == Kind::ARRAY_T) {
+         if (!getElemTy().isCompatibleWith(other.getElemTy())) {
+            return false;
+         }
+         if (isFixedSizeArrayTy() && other.isFixedSizeArrayTy()) {
+            return getArraySize() == other.getArraySize();
+         }
+      } else if (kind_ == Kind::FN_T) {
+         if (!getRetTy().isCompatibleWith(other.getRetTy()) ||
+             getParamTys().size() != other.getParamTys().size() ||
+             isVarArgFnTy() != other.isVarArgFnTy()) {
+            return false;
+         }
+         for (size_t i = 0; i < getParamTys().size(); ++i) {
+            if (!getParamTys()[i].isCompatibleWith(other.getParamTys()[i])) {
+               return false;
+            }
+         }
+      } else if (kind_ == Kind::STRUCT_T || kind_ == Kind::UNION_T) {
+         if (structOrUnionTy().incomplete || other.structOrUnionTy().incomplete) {
+            return structOrUnionTy().tag == other.structOrUnionTy().tag;
+         }
+         if (structOrUnionTy().members.size() != other.structOrUnionTy().members.size()) {
+            return false;
+         }
+         for (size_t i = 0; i < structOrUnionTy().members.size(); ++i) {
+            auto thisMember = structOrUnionTy().members[i];
+            auto otherMember = other.structOrUnionTy().members[i];
+            if (!thisMember.ty.isCompatibleWith(otherMember.ty)) {
+               return false;
+            }
+            // todo: alignemt specifier
+            if (thisMember.name || otherMember.name) {
+               return thisMember.name == otherMember.name;
+            }
+         }
+      }
+      return true;
+   }
+
+   Type getRetTy() const;
+   const std::vector<Type>& getParamTys() const;
+   Type getElemTy() const;
+   Type getPointedToTy() const;
    const std::vector<TaggedTY>& getMembers() const;
+   std::size_t getArraySize() const;
+   Type getUnderlyingTy() const { return enumTy().underlyingType; }
 
    Kind kind() const { return kind_; }
 
@@ -131,32 +203,32 @@ struct Base {
       bool operator==(const EnumTy& other) const = default;
       bool operator!=(const EnumTy& other) const = default;
 
-      bool incomplete;
-      unsigned tag;
-      TY underlyingType;
+      Ident tag;
+      // todo: fixed underlying type needed? ask alexis
+      Type underlyingType;
    };
 
    struct FnTy {
       bool operator==(const FnTy& other) const = default;
       bool operator!=(const FnTy& other) const = default;
 
-      std::vector<TY> paramTys{};
-      TY retTy{};
-      bool isVarArg;
+      std::vector<Type> paramTys{};
+      Type retTy{};
+      bool isVarArgFnTy;
    };
 
    struct ArrayTy {
       bool operator==(const ArrayTy& other) const = default;
       bool operator!=(const ArrayTy& other) const = default;
 
-      TY elemTy;
+      Type elemTy;
       bool unspecifiedSize;
-      std::variant<std::monostate, iconst_t*, ssa_t*> size;
+      std::variant<std::monostate, std::size_t, ssa_t*> size;
       // See also Example 5 in section 6.7.9.
    };
 
    VARIANT_ACCESS_METHODS(signedness, Signedness, data_)
-   VARIANT_ACCESS_METHODS(ptrTy, TY, data_)
+   VARIANT_ACCESS_METHODS(ptrTy, Type, data_)
    VARIANT_ACCESS_METHODS(structOrUnionTy, StructOrUnionTy, data_)
    VARIANT_ACCESS_METHODS(enumTy, EnumTy, data_)
    VARIANT_ACCESS_METHODS(fnTy, FnTy, data_)
@@ -173,7 +245,7 @@ struct Base {
 
    void strImpl(std::stringstream& ss) const;
 
-   TY* derivedFrom() {
+   Type* derivedFrom() {
       switch (kind_) {
          case Kind::PTR_T:
             return &ptrTy();
@@ -186,7 +258,7 @@ struct Base {
       }
    }
 
-   const TY* derivedFrom() const {
+   const Type* derivedFrom() const {
       switch (kind_) {
          case Kind::PTR_T:
             return &ptrTy();
@@ -201,7 +273,7 @@ struct Base {
 
    Kind kind_;
    ty_t* ref_ = nullptr;
-   std::variant<Signedness, TY, StructOrUnionTy, EnumTy, FnTy, ArrayTy> data_;
+   std::variant<Signedness, Type, StructOrUnionTy, EnumTy, FnTy, ArrayTy> data_;
 };
 // ---------------------------------------------------------------------------
 // Base
@@ -220,19 +292,41 @@ int Base<_EmitterT>::rank() const {
       // todo: (jr) how to handle this?
       return -1;
    }
-   assert(kind_ >= Kind::BOOL && kind_ <= Kind::LONGLONG && kind_ != Kind::COMPLEX && "Invalid Base::Kind to rank()");
-
-   return static_cast<int>(kind_);
+   switch (kind_) {
+      case Kind::BOOL:
+      case Kind::CHAR:
+      case Kind::SHORT:
+      case Kind::INT:
+         return static_cast<int>(kind_) - 1;
+      case Kind::LONG:
+         return 4;
+      case Kind::LONGLONG:
+         return 5;
+      case Kind::FLOAT:
+         return 6;
+      case Kind::DOUBLE:
+         return 7;
+      case Kind::LONGDOUBLE:
+         return 8;
+      case Kind::DECIMAL32:
+         return 9;
+      case Kind::DECIMAL64:
+         return 10;
+      case Kind::DECIMAL128:
+         return 11;
+      default:
+         assert(false && "Invalid Base::Kind to rank()");
+   }
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-bool Base<_EmitterT>::variablyModified() const {
+bool Base<_EmitterT>::isVariablyModifiedTy() const {
    // todo: pointer and function types
    if (kind_ == Kind::ARRAY_T) {
       return std::holds_alternative<ssa_t*>(arrayTy().size);
    } else if (kind_ == Kind::STRUCT_T || kind_ == Kind::UNION_T) {
       for (const auto& member : structOrUnionTy().members) {
-         if (member.type.variablyModified()) {
+         if (member.type.isVariablyModifiedTy()) {
             return true;
          }
       }
@@ -305,23 +399,25 @@ bool Base<_EmitterT>::isArithmeticTy() const {
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-bool Base<_EmitterT>::isCompleteType() const {
+bool Base<_EmitterT>::isCompleteTy() const {
    switch (kind_) {
       case Kind::VOID:
          return false;
       case Kind::ARRAY_T:
-         return getElemTy()->isCompleteType();
+         return !arrayTy().unspecifiedSize && getElemTy()->isCompleteTy();
       case Kind::STRUCT_T:
       case Kind::UNION_T:
          if (structOrUnionTy().incomplete) {
             return false;
          }
          for (const auto& member : getMembers()) {
-            if (!member->isCompleteType()) {
+            if (!member->isCompleteTy()) {
                return false;
             }
          }
          return true;
+      case Kind::ENUM_T:
+         return enumTy().underlyingType && enumTy().underlyingType->isCompleteTy();
       default:
          return true;
    }
@@ -353,27 +449,68 @@ bool Base<_EmitterT>::isSignedCharlikeTy() const {
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-bool Base<_EmitterT>::isVarArg() const {
-   return kind_ == Kind::FN_T && fnTy().isVarArg;
+bool Base<_EmitterT>::isVarArgFnTy() const {
+   return kind_ == Kind::FN_T && fnTy().isVarArgFnTy;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-typename Base<_EmitterT>::TY Base<_EmitterT>::getRetTy() const {
+typename Base<_EmitterT>::Type Base<_EmitterT>::getRetTy() const {
    return fnTy().retTy;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-const std::vector<typename Base<_EmitterT>::TY>& Base<_EmitterT>::getParamTys() const {
+const std::vector<typename Base<_EmitterT>::Type>& Base<_EmitterT>::getParamTys() const {
    return fnTy().paramTys;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-typename Base<_EmitterT>::TY Base<_EmitterT>::getElemTy() const {
+typename Base<_EmitterT>::Type Base<_EmitterT>::getElemTy() const {
    return arrayTy().elemTy;
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-typename Base<_EmitterT>::TY Base<_EmitterT>::getPointedToTy() const {
+bool Base<_EmitterT>::isFixedSizeArrayTy() const {
+   if (kind_ == Kind::ARRAY_T) {
+      return !std::holds_alternative<ssa_t*>(arrayTy().size);
+   }
+   return false;
+}
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+bool Base<_EmitterT>::isArrayTy() const {
+   return kind_ == Kind::ARRAY_T;
+}
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+bool Base<_EmitterT>::isUnionTy() const {
+   return kind_ == Kind::UNION_T;
+}
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+bool Base<_EmitterT>::isFnTy() const {
+   return kind_ == Kind::FN_T;
+}
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+bool Base<_EmitterT>::isStructTy() const {
+   return kind_ == Kind::STRUCT_T;
+}
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+bool Base<_EmitterT>::isEnumTy() const {
+   return kind_ == Kind::ENUM_T;
+}
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+std::size_t Base<_EmitterT>::getArraySize() const {
+   if (const std::size_t* size = std::get_if<std::size_t>(&arrayTy().size)) {
+      return *size;
+   }
+   assert(false && "Array size is not a constant");
+}
+// ---------------------------------------------------------------------------
+template <typename _EmitterT>
+typename Base<_EmitterT>::Type Base<_EmitterT>::getPointedToTy() const {
    return ptrTy();
 }
 // ---------------------------------------------------------------------------
@@ -386,22 +523,19 @@ template <typename _EmitterT>
 void Base<_EmitterT>::populateEmitterType(TypeFactory<_EmitterT>& factory, _EmitterT& emitter) {
    assert((!ref_ || ((kind_ == Kind::STRUCT_T || kind_ == Kind::UNION_T) && structOrUnionTy().incomplete)) && "Emitter type already populated");
 
-   unsigned bits = 0;
-
-   // todo: union, enum
    if (kind_ == Kind::PTR_T) {
-      if (!getPointedToTy()->isCompleteType()) {
+      if (!getPointedToTy()->isCompleteTy()) {
          ref_ = emitter.emitPtrTo(factory.voidTy());
       } else {
          ref_ = emitter.emitPtrTo(ptrTy());
       }
       return;
    } else if (kind_ == Kind::FN_T) {
-      ref_ = emitter.emitFnTy(fnTy().retTy, fnTy().paramTys, fnTy().isVarArg);
+      ref_ = emitter.emitFnTy(fnTy().retTy, fnTy().paramTys, fnTy().isVarArgFnTy);
       return;
    } else if (kind_ == Kind::ARRAY_T) {
-      if (iconst_t** size = std::get_if<iconst_t*>(&arrayTy().size)) {
-         ref_ = emitter.emitArrayTy(arrayTy().elemTy, *size);
+      if (const std::size_t* size = std::get_if<std::size_t>(&arrayTy().size)) {
+         ref_ = emitter.emitArrayTy(arrayTy().elemTy, emitter.emitIConst(factory.sizeTy(), *size));
       } else {
          ref_ = static_cast<ty_t*>(arrayTy().elemTy);
       }
@@ -416,23 +550,26 @@ void Base<_EmitterT>::populateEmitterType(TypeFactory<_EmitterT>& factory, _Emit
       if (structOrUnionTy().incomplete) {
          return;
       }
-      std::vector<TY> members;
+      std::vector<Type> members;
       for (const auto& member : structOrUnionTy().members) {
          members.push_back(member.ty);
       }
       ref_ = emitter.emitStructTy(members, structOrUnionTy().incomplete, structOrUnionTy().tag.prefix("struct."));
    } else if (kind_ == Kind::UNION_T) {
-      TY max = structOrUnionTy().members.front().ty;
+      Type max = structOrUnionTy().members.front().ty;
       for (const auto& member : structOrUnionTy().members) {
          if (emitter.getIntegerValue(emitter.sizeOf(member.ty)) > emitter.getIntegerValue(emitter.sizeOf(max))) {
             max = member.ty;
          }
       }
       //  std::max_element(structOrUnionTy().members.begin(), structOrUnionTy().members.end(), [&emitter](const TaggedTY& a, const TaggedTY& b) {            return emitter.getIntegerValue(emitter.sizeOf(a.ty)) < emitter.getIntegerValue(emitter.sizeOf(b.ty));})->ty;
-      std::vector<TY> members{max};
+      std::vector<Type> members{max};
 
       ref_ = emitter.emitStructTy(members, structOrUnionTy().tag.prefix("union."));
+   } else if (kind_ == Kind::ENUM_T) {
+      ref_ = enumTy().underlyingType->ref_;
    } else {
+      unsigned bits = 0;
       switch (kind_) {
          case Kind::BOOL:
             bits = 1;
@@ -461,6 +598,9 @@ void Base<_EmitterT>::populateEmitterType(TypeFactory<_EmitterT>& factory, _Emit
          case Kind::DOUBLE:
             ref_ = emitter.emitDoubleTy();
             return;
+         case Kind::LONGDOUBLE:
+            ref_ = emitter.emitLongDoubleTy();
+            return;
          default:
             // todo: (jr) not implemented
             std::cerr << "Invalid Base::Kind to populateEmitterType(): " << *this << std::endl;
@@ -486,16 +626,25 @@ void Base<_EmitterT>::strImpl(std::stringstream& ss) const {
       std::stringstream prepend;
       switch (kind_) {
          case Kind::PTR_T:
-            ptrTy()->strImpl(ss);
-            ss << '*';
+            ss << getPointedToTy() << '*';
+            if (getPointedToTy()->kind() == Kind::ARRAY_T || getPointedToTy()->kind() == Kind::FN_T) {
+               prepend << '(';
+               ss << ')';
+            }
             break;
          case Kind::ARRAY_T:
-            getElemTy()->strImpl(ss);
-            if (iconst_t* const* size = std::get_if<iconst_t*>(&arrayTy().size)) {
-               ss << '[' << *size << ']';
-            } else {
-               ss << "[]";
+            ss << getElemTy();
+            if (getElemTy()->kind() == Kind::FN_T) {
+               prepend << '(';
+               ss << ')';
             }
+            ss << '[';
+            if (isFixedSizeArrayTy()) {
+               ss << std::to_string(getArraySize());
+            } else {
+               ss << "/* variable size */"; // todo: (jr) how to handle this?
+            }
+            ss << ']';
             break;
          case Kind::STRUCT_T:
          case Kind::UNION_T:
@@ -503,56 +652,42 @@ void Base<_EmitterT>::strImpl(std::stringstream& ss) const {
             if (structOrUnionTy().tag) {
                ss << ' ' << structOrUnionTy().tag;
             }
-            if (structOrUnionTy().incomplete) {
-               ss << " /* incomplete */";
+            if (!structOrUnionTy().incomplete) {
+               ss << " { ";
+               for (const auto& member : structOrUnionTy().members) {
+                  ss << member.ty << ' ' << member.name << "; ";
+               }
+               ss << '}';
             }
-            ss << " { ";
-            for (const auto& member : structOrUnionTy().members) {
-               ss << member.ty << ' ' << member.name << "; ";
-            }
-            ss << '}';
             break;
          case Kind::ENUM_T:
-            assert(false && "Not implemented");
+            ss << "enum";
+            if (enumTy().tag) {
+               ss << ' ' << enumTy().tag;
+            }
+            ss << " : " << enumTy().underlyingType;
             break;
          case Kind::FN_T:
-            ss << " function taking (";
+            ss << getRetTy();
+            if (getRetTy()->kind() == Kind::ARRAY_T || getRetTy()->kind() == Kind::FN_T) {
+               prepend << '(';
+               ss << ')';
+            }
+            ss << "(";
             for (size_t i = 0; i < fnTy().paramTys.size(); ++i) {
                ss << fnTy().paramTys[i];
                if (i + 1 < fnTy().paramTys.size()) {
                   ss << ", ";
                }
             }
-            if (fnTy().isVarArg) {
-               if (!fnTy().paramTys.empty()) {
+            if (isVarArgFnTy()) {
+               if (!getParamTys().empty()) {
                   ss << ", ";
                }
                ss << "...";
             }
-            ss << ") returning " << fnTy().retTy;
+            ss << ")";
             break;
-            // prepend << fnTy().retTy;
-            // if (!ss.str().empty()) {
-            //    prepend << '(';
-            //    ss << ')';
-            // }
-            // ss << '(';
-            // for (size_t i = 0; i < fnTy().paramTys.size(); ++i) {
-            //    ss << fnTy().paramTys[i];
-            //    if (i + 1 < fnTy().paramTys.size()) {
-            //       ss << ", ";
-            //    }
-            // }
-            // if (fnTy().isVarArg) {
-            //    if (!fnTy().paramTys.empty()) {
-            //       ss << ", ";
-            //    }
-            //    ss << "...";
-            // }
-            // ss << ')';
-            // prepend << ss.str();
-            // ss.str(prepend.str());
-            // break;
          case Kind::END:
             ss << "undef";
             break;

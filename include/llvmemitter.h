@@ -12,6 +12,8 @@
 #include "llvm/IR/Type.h"
 #include "stringpool.h"
 // ---------------------------------------------------------------------------
+#include "emittertraits.h"
+// ---------------------------------------------------------------------------
 #include <array>
 #include <iostream>
 #include <variant>
@@ -46,10 +48,11 @@ class LLVMEmitter {
 
    // containes a backref to the type with emitterType() method
    // todo: make const
-   using TY = type::Type<LLVMEmitter>;
-   using value_t = std::variant<ssa_t*, const_t*, iconst_t*>;
-   using const_or_iconst_t = std::variant<const_t*, iconst_t*>;
+   using Type = typename emitter_traits<LLVMEmitter>::Type;
+   using value_t = typename emitter_traits<LLVMEmitter>::value_t;
+   using const_or_iconst_t = typename emitter_traits<LLVMEmitter>::const_or_iconst_t;
 
+   // todo: check if int <= long
    static constexpr bool CHAR_HAS_16_BIT = false;
    static constexpr bool CHAR_IS_SIGNED = true;
    static constexpr bool INT_HAS_64_BIT = false;
@@ -67,11 +70,15 @@ class LLVMEmitter {
       Mod->print(llvm::outs(), nullptr);
    }
 
-   unsigned long long getIntegerValue(iconst_t* c) {
+   unsigned long long getUIntegerValue(iconst_t* c) {
       return c->getZExtValue();
    }
 
-   iconst_t* sizeOf(TY ty);
+   long long getIntegerValue(iconst_t* c) {
+      return c->getSExtValue();
+   }
+
+   iconst_t* sizeOf(Type ty);
 
    ty_t* emitVoidTy();
 
@@ -81,24 +88,26 @@ class LLVMEmitter {
 
    ty_t* emitDoubleTy();
 
-   ty_t* emitPtrTo(TY ty);
+   ty_t* emitLongDoubleTy();
 
-   ty_t* emitArrayTy(TY ty, iconst_t* size);
+   ty_t* emitPtrTo(Type ty);
 
-   ty_t* emitStructTy(const std::vector<TY>& tys, bool incomplete, Ident name = Ident());
+   ty_t* emitArrayTy(Type ty, iconst_t* size);
+
+   ty_t* emitStructTy(const std::vector<Type>& tys, bool incomplete, Ident name = Ident());
 
    ssa_t* emitUndef();
 
    ssa_t* emitPoison();
 
    // todo: change vector to iterator
-   ty_t* emitFnTy(TY retTy, std::vector<TY> argTys, bool isVarArg);
+   ty_t* emitFnTy(Type retTy, std::vector<Type> argTys, bool isVarArgFnTy);
 
-   ssa_t* emitGlobalVar(TY ty, Ident name = Ident());
+   ssa_t* emitGlobalVar(Type ty, Ident name = Ident());
 
    void setInitValueGlobalVar(ssa_t* val, const_or_iconst_t init);
 
-   fn_t* emitFnProto(TY fnTy, Ident name = Ident());
+   fn_t* emitFnProto(Type fnTy, Ident name = Ident());
 
    bb_t* emitFn(fn_t* fnProto);
 
@@ -108,23 +117,28 @@ class LLVMEmitter {
 
    bb_t* emitBB(fn_t* fn, bb_t* insertBefore = nullptr, Ident name = Ident());
 
-   iconst_t* emitIConst(TY ty, unsigned long value);
+   iconst_t* emitIConst(Type ty, unsigned long value);
 
-   const_t* emitDConst(TY ty, double value);
+   const_t* emitFPConst(Type ty, double value);
 
-   // todo: const_t* emitConstDaraArray(TY ty, const std::vector<const_or_iconst_t>& values);
+   const_t* emitNullPtr(Type ty);
+
+   const_t* emitArrayConst(Type ty, const std::vector<const_or_iconst_t>& values);
+   const_t* emitArrayConst(Type ty, const_or_iconst_t value);
+
+   const_t* emitStructConst(Type ty, const std::vector<const_or_iconst_t>& values);
+
+   // todo: const_t* emitConstDaraArray(Type ty, const std::vector<const_or_iconst_t>& values);
 
    const_t* emitStringLiteral(const std::string_view str);
 
-   ssa_t* emitLocalVar(fn_t* fn, bb_t* entry, TY ty, Ident name = Ident(), bool insertAtBegin = false /* TODO: this is only here so that the output is identical to clang but not necessary */);
+   ssa_t* emitLocalVar(fn_t* fn, bb_t* entry, Type ty, Ident name = Ident(), bool insertAtBegin = false /* TODO: this is only here so that the output is identical to clang but not necessary */);
 
-   void setInitValueLocalVar(fn_t* fn, TY ty, ssa_t* val, value_t value);
+   ssa_t* emitAlloca(bb_t* bb, Type ty, ssa_t* size, Ident name = Ident());
 
-   ssa_t* emitAlloca(bb_t* bb, TY ty, ssa_t* size, Ident name = Ident());
+   ssa_t* emitLoad(bb_t* bb, Type ty, ssa_t* ptr, Ident name = Ident());
 
-   ssa_t* emitLoad(bb_t* bb, TY ty, ssa_t* ptr, Ident name = Ident());
-
-   void emitStore(bb_t* bb, TY ty, value_t value, ssa_t* ptr);
+   void emitStore(bb_t* bb, Type ty, value_t value, ssa_t* ptr);
 
    ssa_t* emitJump(bb_t* bb, bb_t* target);
 
@@ -132,35 +146,36 @@ class LLVMEmitter {
 
    ssa_t* emitRet(bb_t* bb, value_t value);
 
-   phi_t* emitPhi(bb_t* bb, TY ty, Ident name = Ident());
+   phi_t* emitPhi(bb_t* bb, Type ty, Ident name = Ident());
 
    void addIncoming(phi_t* phi, ssa_t* value, bb_t* bb, Ident name = Ident());
 
-   ssa_t* emitBinOp(bb_t* bb, TY ty, op::Kind kind, value_t lhs, value_t rhs, ssa_t* dest = nullptr, Ident name = Ident());
+   ssa_t* emitBinOp(bb_t* bb, Type ty, op::Kind kind, value_t lhs, value_t rhs, ssa_t* dest = nullptr, Ident name = Ident());
 
-   const_or_iconst_t emitConstBinOp(bb_t* bb, TY ty, op::Kind kind, const_or_iconst_t lhs, const_or_iconst_t rhs, Ident name = Ident());
+   const_or_iconst_t emitConstBinOp(bb_t* bb, Type ty, op::Kind kind, const_or_iconst_t lhs, const_or_iconst_t rhs, Ident name = Ident());
 
-   ssa_t* emitIncDecOp(bb_t* bb, TY ty, op::Kind kind, ssa_t* operand, Ident name = Ident());
+   ssa_t* emitIncDecOp(bb_t* bb, Type ty, op::Kind kind, ssa_t* operand, Ident name = Ident());
 
-   ssa_t* emitNeg(bb_t* bb, TY ty, ssa_t* operand, Ident name = Ident());
+   ssa_t* emitNeg(bb_t* bb, Type ty, ssa_t* operand, Ident name = Ident());
 
-   const_or_iconst_t emitConstNeg(bb_t* bb, TY ty, const_or_iconst_t operand, Ident name = Ident());
+   const_or_iconst_t emitConstNeg(bb_t* bb, Type ty, const_or_iconst_t operand, Ident name = Ident());
 
-   ssa_t* emitBWNeg(bb_t* bb, TY ty, ssa_t* operand, Ident name = Ident());
+   ssa_t* emitBWNeg(bb_t* bb, Type ty, ssa_t* operand, Ident name = Ident());
 
-   const_or_iconst_t emitConstBWNeg(bb_t* bb, TY ty, const_or_iconst_t operand, Ident name = Ident());
+   const_or_iconst_t emitConstBWNeg(bb_t* bb, Type ty, const_or_iconst_t operand, Ident name = Ident());
 
-   const_or_iconst_t emitConstCast(bb_t* bb, TY fromTy, const_or_iconst_t val, TY toTy, qcp::type::Cast cast);
+   const_or_iconst_t emitConstCast(bb_t* bb, Type fromTy, const_or_iconst_t val, Type toTy, qcp::type::Cast cast);
 
-   ssa_t* emitCast(bb_t* bb, TY fromTy, ssa_t* val, TY toTy, qcp::type::Cast cast);
+   ssa_t* emitCast(bb_t* bb, Type fromTy, ssa_t* val, Type toTy, qcp::type::Cast cast);
 
    ssa_t* emitCall(bb_t* bb, fn_t* fn, const std::vector<value_t>& args, Ident name = Ident());
 
-   ssa_t* emitCall(bb_t* bb, TY fnTy, ssa_t* fnPtr, const std::vector<value_t>& args, Ident name = Ident());
+   ssa_t* emitCall(bb_t* bb, Type fnTy, ssa_t* fnPtr, const std::vector<value_t>& args, Ident name = Ident());
 
-   ssa_t* emitGEP(bb_t* bb, TY ty, value_t ptr, std::array<uint32_t, 2> idx, Ident name = Ident());
-   ssa_t* emitGEP(bb_t* bb, TY ty, value_t ptr, std::array<uint32_t, 3> idx, Ident name = Ident());
-   ssa_t* emitGEP(bb_t* bb, TY ty, value_t ptr, value_t idx, Ident name = Ident());
+   ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, std::array<uint64_t, 2> idx, Ident name = Ident());
+   ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, std::array<uint32_t, 2> idx, Ident name = Ident());
+   ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, std::array<uint32_t, 3> idx, Ident name = Ident());
+   ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, value_t idx, Ident name = Ident());
 
    sw_t* emitSwitch(bb_t* bb, value_t value);
 
@@ -169,10 +184,10 @@ class LLVMEmitter {
    void addSwitchDefault(sw_t* sw, bb_t* target);
 
    private:
-   ssa_t* emitGEPImpl(bb_t* bb, TY ty, value_t ptr, std::array<ssa_t*, 3> idx, Ident name);
+   ssa_t* emitGEPImpl(bb_t* bb, Type ty, value_t ptr, std::array<ssa_t*, 3> idx, Ident name);
 
    ssa_t* emitCall(bb_t* bb, llvm::FunctionCallee fn, const std::vector<value_t>& args, Ident name = Ident());
-   ssa_t* emitAllocaImpl(bb_t* bb, TY ty, ssa_t* size, Ident name, bool insertAtBegin);
+   ssa_t* emitAllocaImpl(bb_t* bb, Type ty, ssa_t* size, Ident name, bool insertAtBegin);
 
    llvm::LLVMContext Ctx;
    std::unique_ptr<llvm::Module> mod_;

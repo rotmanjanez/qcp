@@ -11,8 +11,13 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <clocale>
+#include <cstdlib>
+#include <cwchar>
 #include <iomanip>
 #include <limits>
+#include <string>
+#include <string_view>
 #include <tuple>
 // ---------------------------------------------------------------------------
 namespace qcp {
@@ -200,7 +205,7 @@ bool isSimpleEscapeSequenceChar(const char c) {
 template <typename T, typename U>
 T safe_cast(U value) {
    if (value > std::numeric_limits<T>::max()) {
-      assert(false && "value to large for safe cast");
+      throw std::overflow_error("value to large for safe cast");
    }
    return static_cast<T>(value);
 }
@@ -220,7 +225,7 @@ sv_it findEndOfINumber(sv_it begin, sv_it end, _NumberPredicate _p, DiagnosticTr
       }
    } while (numberEnd != end && !(prev == '\'' && *numberEnd == '\'') && _p(*numberEnd));
    if (prev == '\'') {
-      diagnostics.report("invalid number: number may not end with '");
+      diagnostics << "invalid number: number may not end with '";
    }
    return numberEnd;
 }
@@ -240,15 +245,17 @@ sv_it findEndOfExponent(sv_it begin, sv_it end, DiagnosticTracker& diagnostics) 
 }
 // ---------------------------------------------------------------------------
 template <const char quoteChar>
-sv_it getCharSequence(sv_it begin, sv_it end, DiagnosticTracker& diagnostics) {
+std::pair<std::string, sv_it> getCharSequence(sv_it progBegin, sv_it begin, sv_it end, DiagnosticTracker& diagnostics) {
    sv_it cSeqEnd{begin + 1};
+   std::string literal{};
    while (cSeqEnd != end) {
-      cSeqEnd = std::find_if(cSeqEnd, end, [](const char c) { return c == '\\' || c == '"' || c == '\n'; });
+      begin = cSeqEnd;
+      cSeqEnd = std::find_if(cSeqEnd, end, [](const char c) { return c == '\\' || c == quoteChar || c == '\n'; });
       if (cSeqEnd == end) {
          diagnostics << "unterminated character sequence" << std::endl;
          break;
       }
-
+      literal += std::string_view{begin, cSeqEnd};
       if (*cSeqEnd == '\\') {
          if (cSeqEnd + 1 == end) {
             diagnostics << "unterminated character sequence" << std::endl;
@@ -258,30 +265,44 @@ sv_it getCharSequence(sv_it begin, sv_it end, DiagnosticTracker& diagnostics) {
          if (isOctalDigit(*cSeqEnd)) {
             // octal
             int octalCount;
+            int value = 0;
             for (octalCount = 1; octalCount < 3 && (cSeqEnd + octalCount) != end; ++octalCount) {
                if (!isOctalDigit(*(cSeqEnd + octalCount))) {
                   diagnostics << "invalid octal escape sequence" << std::endl;
                   break;
+               } else {
+                  value = value * 8 + (*cSeqEnd - '0');
                }
             }
             cSeqEnd += octalCount;
-            // todo: (jr) handle octal values
+            literal += static_cast<char>(value);
          } else if (*cSeqEnd == 'x') {
             // hex
             ++cSeqEnd;
-            int hexCount = 0;
-            while (cSeqEnd != end && isHexDigit(*cSeqEnd)) {
-               ++cSeqEnd;
-               ++hexCount;
-            }
-            if (hexCount == 0) {
+            char* endPtr;
+            long value = strtol(cSeqEnd, &endPtr, 16);
+            // todo: too large char or w_char
+
+            if (std::distance(&*cSeqEnd, static_cast<const char*>(endPtr)) == 0) {
                diagnostics << "invalid hex escape sequence" << std::endl;
             }
-            // todo: (jr) handle hex values
+            cSeqEnd = endPtr;
+            literal += static_cast<char>(value);
+         } else if (*cSeqEnd == 'u' || *cSeqEnd == 'U') {
+            // universal character name
+            // todo: ask alexis, how to handle this
+            std::mbstate_t state{}; // todo: check error state
+            wchar_t wchar;
+            const char* wCharBegin = cSeqEnd - 1;
+            std::mbsrtowcs(&wchar, &wCharBegin, 10, &state);
+            std::string mb(MB_CUR_MAX, '\0');
+            std::wcrtomb(&mb[0], wchar, &state);
+            literal += mb;
          } else if (isSimpleEscapeSequenceChar(*cSeqEnd)) {
+            literal += *cSeqEnd;
             ++cSeqEnd;
          } else {
-            diagnostics << "unknown escape sequence" << std::endl;
+            diagnostics << SrcLoc(progBegin, begin, cSeqEnd) << "unknown escape sequence" << std::endl;
          }
       } else if (*cSeqEnd == '\n') {
          diagnostics << "unterminated character sequence" << std::endl;
@@ -292,12 +313,11 @@ sv_it getCharSequence(sv_it begin, sv_it end, DiagnosticTracker& diagnostics) {
       }
    }
 
-   if (cSeqEnd == end || *cSeqEnd != quoteChar) {
-      return cSeqEnd;
+   if (cSeqEnd != end && *cSeqEnd == quoteChar) {
+      ++cSeqEnd;
    }
 
-   ++cSeqEnd;
-   return cSeqEnd;
+   return {literal, cSeqEnd};
 }
 // ---------------------------------------------------------------------------
 sv_it Tokenizer::const_iterator::getNumberConst(sv_it begin) {
@@ -305,6 +325,7 @@ sv_it Tokenizer::const_iterator::getNumberConst(sv_it begin) {
    sv_it suffixEnd;
    int base;
    bool isFloat = false;
+   bool valid = true;
 
    const char second = (begin + 1 != prog_.end()) ? *(begin + 1) : 0;
    if (*begin == '0' && (second == 'x' or second == 'X')) {
@@ -325,11 +346,9 @@ sv_it Tokenizer::const_iterator::getNumberConst(sv_it begin) {
          isFloat = true;
       }
 
-      if (isFloat) {
-         // for hex float, strtod expects the '0x' prefix to be included
-         begin -= 2;
-      } else if (valueEnd == begin) {
+      if (valueEnd == begin) {
          *diagnostics_ << "invalid hex number" << std::endl;
+         valid = false;
       }
    } else if (*begin == '0' && (second == 'b' or second == 'B')) {
       // binary
@@ -338,6 +357,7 @@ sv_it Tokenizer::const_iterator::getNumberConst(sv_it begin) {
       valueEnd = findEndOfINumber(begin, prog_.end(), isBinaryDigit, *diagnostics_);
       if (valueEnd == begin) {
          *diagnostics_ << "invalid binary number" << std::endl;
+         valid = false;
       }
    } else {
       // decimal, octal or decimal-float
@@ -354,6 +374,7 @@ sv_it Tokenizer::const_iterator::getNumberConst(sv_it begin) {
          base = 8;
          if (findEndOfINumber(begin + 1, prog_.end(), isOctalDigit, *diagnostics_) != valueEnd) {
             *diagnostics_ << "invalid octal number" << std::endl;
+            valid = false;
          }
       } else {
          base = 10;
@@ -374,6 +395,11 @@ sv_it Tokenizer::const_iterator::getNumberConst(sv_it begin) {
    // sanitize value representation (remove single quotes)
    auto valueReprEnd = std::remove(valueRepr.begin(), valueRepr.end(), '\'');
    valueRepr.erase(valueReprEnd, valueRepr.end());
+
+   // for hex float, strtod expects the '0x' prefix to be included
+   if (isFloat && base == 16) {
+      valueRepr = "0x" + valueRepr;
+   }
 
    bool unsignedSuffix = false;
    bool longSuffix = false;
@@ -431,14 +457,14 @@ sv_it Tokenizer::const_iterator::getNumberConst(sv_it begin) {
 
    SrcLoc loc{progBegin_, begin, suffixEnd};
    if (isFloat) {
-      double value = std::strtod(valueRepr.c_str(), &pos);
+      double value = valid ? std::strtod(valueRepr.c_str(), &pos) : 0.0;
       if (floatSuffix) {
          token_ = Tokenizer::Token{loc, safe_cast<float>(value)};
       } else {
          token_ = Tokenizer::Token{loc, value};
       }
    } else if (unsignedSuffix) {
-      unsigned long long value = std::strtoull(valueRepr.c_str(), &pos, base);
+      unsigned long long value = valid ? std::strtoull(valueRepr.c_str(), &pos, base) : 0;
       if (longLongSuffix) {
          token_ = Tokenizer::Token{loc, value};
       } else if (longSuffix) {
@@ -447,7 +473,7 @@ sv_it Tokenizer::const_iterator::getNumberConst(sv_it begin) {
          token_ = Tokenizer::Token{loc, safe_cast<unsigned>(value)};
       }
    } else {
-      long long value = static_cast<long long>(std::strtoull(valueRepr.c_str(), &pos, base));
+      long long value = valid ? static_cast<long long>(std::strtoull(valueRepr.c_str(), &pos, base)) : 0;
       if (longLongSuffix) {
          token_ = Tokenizer::Token{loc, safe_cast<long long>(value)};
       } else if (longSuffix) {
@@ -714,14 +740,14 @@ sv_it Tokenizer::const_iterator::getPunctuator(sv_it begin) {
 }
 // ---------------------------------------------------------------------------
 sv_it Tokenizer::const_iterator::getSCharSequence(sv_it begin) {
-   sv_it sSeqEnd = getCharSequence<'"'>(begin, prog_.end(), *diagnostics_);
-   token_ = Token{SrcLoc(progBegin_, begin, sSeqEnd), std::string_view{begin + 1, sSeqEnd - 1}, TK::SLITERAL};
+   auto [literal, sSeqEnd] = getCharSequence<'"'>(progBegin_, begin, prog_.end(), *diagnostics_);
+   token_ = Token{SrcLoc(progBegin_, begin, sSeqEnd), std::move(literal), TK::SLITERAL};
    return sSeqEnd;
 }
 // ---------------------------------------------------------------------------
 sv_it Tokenizer::const_iterator::getCCharSequence(sv_it begin) {
-   sv_it cSeqEnd = getCharSequence<'\''>(begin, prog_.end(), *diagnostics_);
-   token_ = Token{SrcLoc(progBegin_, begin, cSeqEnd), std::string_view{begin + 1, cSeqEnd - 1}, TK::CLITERAL};
+   auto [literal, cSeqEnd] = getCharSequence<'\''>(progBegin_, begin, prog_.end(), *diagnostics_);
+   token_ = Token{SrcLoc(progBegin_, begin, cSeqEnd), std::move(literal), TK::CLITERAL}; // todo: check if move
    return cSeqEnd;
 }
 // ---------------------------------------------------------------------------
@@ -757,8 +783,8 @@ find_token_start:
       // todo: this should be preprocessor?
       if (*begin == '/' && second == '/') {
          end = std::find_if(begin + 2, prog_.end(), [](char c) { return c == '\n'; });
-         diagnostics_->registerLineBreak(std::distance(prog_.begin() + 1, end));
-         prog_ = prog_.substr(std::distance(prog_.begin(), end));
+         diagnostics_->registerLineBreak(std::distance(progBegin_, end));
+         prog_ = prog_.substr(std::distance(prog_.begin(), end) + 1);
          begin = prog_.begin();
          goto find_token_start;
       } else if (*begin == '/' && second == '*') {
@@ -801,9 +827,17 @@ find_token_start:
    prog_ = prog_.substr(std::distance(prog_.begin(), end));
 
    if (requiresSeparator && !prog_.empty()) {
-      const char c = prog_.front();
-      if (!(isSeparator(c) || isPunctuatorStart(c) || c == ']')) {
-         *diagnostics_ << "token not fully consumed" << std::endl;
+      auto it = prog_.begin();
+      while (it != prog_.end() && !isSeparator(*it) && !isPunctuatorStart(*it) && *it != ']') {
+         ++it;
+      }
+      if (it != prog_.begin()) {
+         if (token_.getKind() == TK::DCONST || token_.getKind() == TK::FCONST || token_.getKind() == TK::LDCONST) {
+            *diagnostics_ << SrcLoc(progBegin_, prog_.begin(), prog_.begin()) << "invalid suffix '" << std::string_view(prog_.begin(), it) << "' on floating constant" << std::endl;
+         } else {
+            *diagnostics_ << SrcLoc(progBegin_, prog_.begin(), it) << "token not fully consumed" << std::endl;
+         }
+         prog_ = prog_.substr(std::distance(prog_.begin(), it));
       }
    }
 

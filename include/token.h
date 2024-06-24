@@ -15,7 +15,7 @@
 namespace qcp {
 namespace token {
 // ---------------------------------------------------------------------------
-enum Kind {
+enum class Kind {
 #include "defs/tokens.def"
 };
 // ---------------------------------------------------------------------------
@@ -23,35 +23,13 @@ std::ostream& operator<<(std::ostream& os, const Kind& tt);
 // ---------------------------------------------------------------------------
 struct GPerfToken {
    const char* keyword;
-   int tokenType = Kind::UNKNOWN;
-};
-// ---------------------------------------------------------------------------
-struct ConstExprValue {
-   ConstExprValue(long double value) : ld{value} {}
-   ConstExprValue(double value) : d{value} {}
-   ConstExprValue(float value) : f{value} {}
-   ConstExprValue(unsigned long long value) : ull{value} {}
-   ConstExprValue(unsigned long value) : ul{value} {}
-   ConstExprValue(unsigned value) : u{value} {}
-   ConstExprValue(long long value) : ll{value} {}
-   ConstExprValue(long value) : l{value} {}
-   ConstExprValue(int value) : i{value} {}
-
-   union {
-      long double ld;
-      double d;
-      float f;
-      unsigned long long ull;
-      unsigned long ul;
-      unsigned u;
-      long long ll;
-      long l;
-      int i;
-   };
+   int tokenType = static_cast<int>(Kind::UNKNOWN);
 };
 // ---------------------------------------------------------------------------
 class Token {
    public:
+   using data_t = std::variant<Ident, std::string, unsigned long long, long double>;
+
    Token() : type{Kind::UNKNOWN} {}
 
    Token(SrcLoc loc, float value) : type{Kind::FCONST}, value{value}, loc_{loc} {}
@@ -61,12 +39,12 @@ class Token {
    Token(SrcLoc loc, unsigned long long value) : type{Kind::ULL_ICONST}, value{value}, loc_{loc} {}
    Token(SrcLoc loc, unsigned long value) : type{Kind::UL_ICONST}, value{value}, loc_{loc} {}
    Token(SrcLoc loc, unsigned value) : type{Kind::U_ICONST}, value{value}, loc_{loc} {}
-   Token(SrcLoc loc, long long value) : type{Kind::LL_ICONST}, value{value}, loc_{loc} {}
-   Token(SrcLoc loc, long value) : type{Kind::L_ICONST}, value{value}, loc_{loc} {}
-   Token(SrcLoc loc, int value) : type{Kind::ICONST}, value{value}, loc_{loc} {}
+   Token(SrcLoc loc, long long value) : type{Kind::LL_ICONST}, value{static_cast<unsigned long long>(value)}, loc_{loc} {}
+   Token(SrcLoc loc, long value) : type{Kind::L_ICONST}, value{static_cast<unsigned long long>(value)}, loc_{loc} {}
+   Token(SrcLoc loc, int value) : type{Kind::ICONST}, value{static_cast<unsigned long long>(value)}, loc_{loc} {}
 
-   Token(SrcLoc loc, std::string_view value, Kind type) : type{type}, sliteral{value}, loc_{loc} {}
-   Token(SrcLoc loc, Ident id, Kind type = Kind::IDENT) : type{type}, ident{id}, loc_{loc} {}
+   Token(SrcLoc loc, std::string&& value, Kind type) : type{type}, value{std::move(value)}, loc_{loc} { assert(type == Kind::SLITERAL || type == Kind::CLITERAL); }
+   Token(SrcLoc loc, Ident id, Kind type = Kind::IDENT) : type{type}, value{id}, loc_{loc} { assert(type != Kind::SLITERAL && type != Kind::CLITERAL); }
 
    explicit Token(Kind type) : type{type}, loc_{} {}
    Token(SrcLoc loc, Kind type) : type{type}, loc_{loc} {}
@@ -93,44 +71,31 @@ class Token {
 
    template <typename T>
    T getValue() const {
-      if constexpr (std::is_same_v<T, double>) {
-         return value.f;
-      } else if constexpr (std::is_same_v<T, unsigned long long>) {
-         return value.ull;
-      } else if constexpr (std::is_same_v<T, unsigned long>) {
-         return value.ul;
-      } else if constexpr (std::is_same_v<T, unsigned>) {
-         return value.u;
-      } else if constexpr (std::is_same_v<T, long long>) {
-         return value.ll;
-      } else if constexpr (std::is_same_v<T, long>) {
-         return value.l;
-      } else if constexpr (std::is_same_v<T, int>) {
-         return value.i;
-      } else if constexpr (std::is_same_v<T, Ident>) {
-         return ident;
-      } else if constexpr (std::is_same_v<T, std::string_view>) {
-         return sliteral;
+      if constexpr (std::is_integral_v<T>) {
+         return static_cast<T>(std::get<unsigned long long>(value));
+      } else if constexpr (std::is_floating_point_v<T>) {
+         return static_cast<T>(std::get<long double>(value));
       } else {
-         assert(false && "Unsupported type");
+         static_assert(std::is_same_v<T, std::string> || std::is_same_v<T, Ident>, "Invalid type for Token::getValue");
+         return std::get<T>(value);
       }
+   }
+
+   std::string_view getString() const {
+      return std::get<std::string>(value);
    }
 
    SrcLoc getLoc() const {
       return loc_;
    }
 
-   ConstExprValue getRawValue() const {
+   data_t getRawValue() const {
       return value;
    }
 
    private:
    Kind type;
-   union {
-      Ident ident;
-      std::string_view sliteral;
-      ConstExprValue value;
-   };
+   data_t value;
    SrcLoc loc_;
 };
 // ---------------------------------------------------------------------------

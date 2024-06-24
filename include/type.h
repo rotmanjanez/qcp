@@ -6,6 +6,9 @@
 #include "operator.h"
 #include "token.h"
 // ---------------------------------------------------------------------------
+#include <iostream>
+#include <sstream>
+#include <variant>
 #include <vector>
 // ---------------------------------------------------------------------------
 namespace qcp {
@@ -24,7 +27,7 @@ enum class Signedness {
 enum class Cast {
    // clang-format off
    TRUNC, ZEXT, SEXT, FPTOUI, FPTOSI, UITOFP, SITOFP, FPTRUNC, FPEXT,
-   PTRTOINT, INTTOPTR, BITCAST,
+   PTRTOINT, INTTOPTR, BITCAST, END
    // clang-format on
 };
 // ---------------------------------------------------------------------------
@@ -86,6 +89,16 @@ class Type {
       Type ty{other};
       ty.addQualifier(kind);
       return ty;
+   }
+
+   bool isCompatibleWith(const Type& other) const {
+      if (!*this || !other) {
+         return false;
+      }
+      if (qualifiers != other.qualifiers) {
+         return false;
+      }
+      return (*this)->isCompatibleWith(*other);
    }
 
    Type& addQualifier(token::Kind kind) {

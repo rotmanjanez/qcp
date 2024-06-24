@@ -37,7 +37,7 @@ class Ident {
    // stringlike template
    template <typename T>
    Ident operator+(T rhs) const {
-      return Ident{std::string(*this) + rhs};
+      return Ident{std::string(*this) + std::string(rhs)};
    }
 
    Ident prefix(const char* str) const {

@@ -19,55 +19,53 @@ class Expr {
    friend void dump(std::ostream& os, const Expr<T>& expr, int indent);
 
    public:
-   using TY = type::Type<_EmitterT>;
+   using trait = emitter::emitter_traits<_EmitterT>;
+   using Type = typename trait::Type;
+   using ssa_t = typename trait::ssa_t;
+   using value_t = typename trait::value_t;
+   using ScopeInfo = typename trait::ScopeInfo;
+
    using Token = token::Token;
-   using ConstExprValue = token::ConstExprValue;
    using OpSpec = op::OpSpec;
    using OpKind = op::Kind;
 
-   using ssa_t = typename _EmitterT::ssa_t;
-   using const_t = typename _EmitterT::const_t;
-   using bb_t = typename _EmitterT::bb_t;
-   using fn_t = typename _EmitterT::fn_t;
-   using value_t = typename _EmitterT::value_t;
-
-   using ScopeInfo = ScopeInfo<_EmitterT>;
    using Scope = Scope<Ident, ScopeInfo>;
 
    using expr_t = std::unique_ptr<Expr>;
 
-   Expr(SrcLoc loc, TY ty, value_t value, Ident id = Ident()) : op{},
-                                                                opspec{0, 0},
-                                                                // todo: may be redundant
-                                                                isConstExpr{std::holds_alternative<const_t*>(value)},
-                                                                mayBeLval_{!!id},
-                                                                ty{ty},
-                                                                loc{loc},
-                                                                ident{id},
-                                                                value{value} {}
+   Expr(SrcLoc loc, Type ty, value_t value, Ident id = Ident(), bool isConstExpr = false) : op{},
+                                                                                            opspec{0, 0},
+                                                                                            // todo: may be redundant
+                                                                                            isConstExpr{isConstExpr || !std::holds_alternative<ssa_t*>(value)},
+                                                                                            ty{ty},
+                                                                                            loc{loc},
+                                                                                            mayBeLval{!!id && std::holds_alternative<ssa_t*>(value)},
+                                                                                            ident{id},
+                                                                                            value{value} {}
 
-   Expr(OpKind op, TY ty, expr_t&& lhs, value_t value) : op{op},
-                                                         opspec{getOpSpec(op)},
-                                                         isConstExpr{std::holds_alternative<const_t*>(value)},
-                                                         ty{ty},
-                                                         loc{lhs->loc},
-                                                         lhs_{std::move(lhs)},
-                                                         rhs_{},
-                                                         value{value} {}
+   Expr(SrcLoc opLoc, OpKind op, Type ty, expr_t&& lhs, value_t value, bool mayBeLVal = false) : op{op},
+                                                                                                 opspec{getOpSpec(op)},
+                                                                                                 isConstExpr{!std::holds_alternative<ssa_t*>(value)},
+                                                                                                 ty{ty},
+                                                                                                 loc{lhs->loc | opLoc},
+                                                                                                 mayBeLval{mayBeLVal},
+                                                                                                 lhs_{std::move(lhs)},
+                                                                                                 rhs_{},
+                                                                                                 value{value} {}
 
    bool isIntConstExpr() const {
       return isConstExpr && ty.isIntegerTy();
    }
 
-   Expr(OpKind op, const TY& ty, expr_t&& lhs, expr_t&& rhs, value_t value, bool mayBeLval = false, Ident name = Ident()) : op{op},
-                                                                                                                            opspec{getOpSpec(op)},
-                                                                                                                            mayBeLval_{mayBeLval},
-                                                                                                                            ty{ty},
-                                                                                                                            loc{lhs->loc | rhs->loc},
-                                                                                                                            ident{name},
-                                                                                                                            lhs_{std::move(lhs)},
-                                                                                                                            rhs_{std::move(rhs)},
-                                                                                                                            value{value} {
+   Expr(OpKind op, const Type& ty, expr_t&& lhs, expr_t&& rhs, value_t value, bool mayBeLval = false, Ident name = Ident()) : op{op},
+                                                                                                                              opspec{getOpSpec(op)},
+                                                                                                                              ty{ty},
+                                                                                                                              loc{lhs->loc | rhs->loc},
+                                                                                                                              mayBeLval{mayBeLval},
+                                                                                                                              ident{name},
+                                                                                                                              lhs_{std::move(lhs)},
+                                                                                                                              rhs_{std::move(rhs)},
+                                                                                                                              value{value} {
       if (lhs_->isConstExpr && rhs_->isConstExpr && !((op >= OpKind::ASSIGN && op <= OpKind::COMMA))) {
          isConstExpr = true;
       }
@@ -77,19 +75,15 @@ class Expr {
       opspec.precedence = prec;
    }
 
-   bool mayBeLval() const {
-      return mayBeLval_;
-   }
-
    private:
    OpKind op;
    OpSpec opspec;
    bool isConstExpr = false;
-   bool mayBeLval_ = false;
 
    public:
-   TY ty;
+   Type ty;
    const SrcLoc loc;
+   bool mayBeLval = false;
 
    // todo: remove this?
    Ident ident;

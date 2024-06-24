@@ -4,38 +4,90 @@
 // qcp
 // ---------------------------------------------------------------------------
 #include <algorithm>
-#include <string_view>
 // ---------------------------------------------------------------------------
 namespace qcp {
 // ---------------------------------------------------------------------------
-struct SrcLoc {
+class SrcLoc {
+   public:
    using loc_off_t = long long;
    using loc_len_t = unsigned;
 
-   loc_off_t loc;
-   loc_len_t len;
+   SrcLoc() : loc_{0}, len_{0} {}
+   explicit SrcLoc(loc_off_t loc, loc_len_t len = 0) : loc_{loc}, len_{len} {}
+   SrcLoc(loc_off_t loc, loc_off_t locEnd) : loc_{loc}, len_{static_cast<loc_len_t>(locEnd - loc)} {}
 
-   using sv_it = typename std::string_view::const_iterator;
+   // copy and move
+   SrcLoc(const SrcLoc&) = default;
+   SrcLoc(SrcLoc&&) noexcept = default;
+   SrcLoc& operator=(const SrcLoc&) = default;
+   SrcLoc& operator=(SrcLoc&&) noexcept = default;
 
-   SrcLoc() : loc{0}, len{0} {}
-   SrcLoc(loc_off_t loc, unsigned len = 0) : loc{loc}, len{len} {}
-   SrcLoc(loc_off_t loc, loc_off_t locEnd) : loc{loc}, len{static_cast<loc_len_t>(locEnd - loc)} {}
-   SrcLoc(sv_it progBegin, sv_it begin, sv_it end) : loc{std::distance(progBegin, begin)}, len{static_cast<loc_len_t>(std::distance(begin, end))} {}
+   template <typename T>
+   SrcLoc(T begin, T start, T end) : loc_{std::distance(begin, start)}, len_{static_cast<loc_len_t>(std::distance(start, end))} {}
 
-   loc_off_t locEnd() const {
-      return loc + len;
-   }
+   loc_off_t locEnd() const;
+   loc_off_t loc() const;
+   loc_len_t len() const;
 
    // idea from aengelke
-   SrcLoc operator|(const SrcLoc& other) const {
-      loc_off_t newLoc{std::min(loc, other.loc)};
-      return {newLoc, std::max(locEnd(), other.locEnd() - newLoc)};
+   SrcLoc operator|(const SrcLoc& other) const;
+   SrcLoc& operator|=(const SrcLoc& other);
+
+   SrcLoc truncate(loc_len_t newLen) const;
+
+   private:
+   loc_off_t loc_;
+   loc_len_t len_;
+};
+// ---------------------------------------------------------------------------
+template <typename T>
+class locateable : public T {
+   public:
+   using T::T;
+
+   template <typename... Args>
+   locateable(SrcLoc loc, Args&&... args) : T{std::forward<Args>(args)...}, loc_{loc} {}
+
+   SrcLoc loc() const {
+      return loc_;
    }
 
-   SrcLoc& operator|=(const SrcLoc& other) {
-      *this = *this | other;
-      return *this;
+   private:
+   SrcLoc loc_;
+};
+// ---------------------------------------------------------------------------
+template <typename T>
+class locateable<T*> {
+   public:
+   locateable(T* ptr, SrcLoc loc) : ptr_{ptr}, loc_{loc} {}
+
+   T* operator->() {
+      return ptr_;
    }
+
+   T* operator->() const {
+      return ptr_;
+   }
+
+   T& operator*() {
+      return *ptr_;
+   }
+
+   T& operator*() const {
+      return *ptr_;
+   }
+
+   operator T*() {
+      return ptr_;
+   }
+
+   SrcLoc loc() const {
+      return loc_;
+   }
+
+   private:
+   T* ptr_;
+   SrcLoc loc_;
 };
 // ---------------------------------------------------------------------------
 } // namespace qcp

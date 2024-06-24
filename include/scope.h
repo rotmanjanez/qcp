@@ -1,10 +1,10 @@
-#ifndef SCOPE_H
-#define SCOPE_H
+#ifndef QCP_SCOPE_H
+#define QCP_SCOPE_H
 // ---------------------------------------------------------------------------
 // qcp
 // ---------------------------------------------------------------------------
-#include "type.h"
-// ---------------------------------------------------------------------------
+#include <algorithm>
+#include <cassert>
 #include <unordered_map>
 #include <vector>
 // ---------------------------------------------------------------------------
@@ -13,8 +13,18 @@ namespace qcp {
 // Inspired by implementation of Alexis Engelke
 // ---------------------------------------------------------------------------
 template <typename T, typename U>
+// todo: require default constructor for U and T
 class Scope {
    struct Entry {
+      Entry() = default;
+      Entry(unsigned level, unsigned generation, const U& value) : level{level}, generation{generation}, value{value} {}
+
+      // copy and move operations
+      Entry(const Entry& other) = default;
+      Entry(Entry&& other) noexcept = default;
+      Entry& operator=(const Entry& other) = default;
+      Entry& operator=(Entry&& other) noexcept = default;
+
       unsigned level;
       unsigned generation;
       U value;
@@ -45,7 +55,7 @@ class Scope {
 
    U* find(const T& name);
 
-   U* insert(const T& name, const U& value);
+   U* insert(T name, U value);
 
    bool canInsert(const T& name);
 
@@ -59,25 +69,6 @@ class Scope {
    unsigned level_ = 0;
    std::vector<unsigned> generations_{0};
    std::unordered_map<T, std::vector<Entry>> symbols_{};
-};
-// ---------------------------------------------------------------------------
-template <typename _EmitterT>
-struct ScopeInfo {
-   using TY = type::Type<_EmitterT>;
-   using ssa_t = typename _EmitterT::ssa_t;
-   using fn_t = typename _EmitterT::fn_t;
-
-   ScopeInfo() = default;
-   ScopeInfo(TY ty) : ty{ty}, ssa{nullptr} {}
-   ScopeInfo(TY ty, ssa_t* ssa, bool hasDefOrInit) : ty{ty}, hasDefOrInit{hasDefOrInit}, ssa{ssa} {}
-   ScopeInfo(TY ty, fn_t* fn, bool hasDefOrInit) : ty{ty}, hasDefOrInit{hasDefOrInit}, fn{fn} {}
-
-   TY ty;
-   bool hasDefOrInit;
-   union {
-      ssa_t* ssa;
-      fn_t* fn;
-   };
 };
 // ---------------------------------------------------------------------------
 // Scope
@@ -111,15 +102,15 @@ U* Scope<T, U>::find(const T& name) {
 }
 // ---------------------------------------------------------------------------
 template <typename T, typename U>
-U* Scope<T, U>::insert(const T& name, const U& value) {
-   auto& vec = symbols_[name];
+U* Scope<T, U>::insert(T name, U value) {
+   std::vector<Entry>& vec = symbols_[name];
    Entry* e = findEntry(name);
 
    if (e && e->level == level_) {
       return nullptr;
    }
 
-   vec.push_back({level_, generations_[level_], value});
+   vec.emplace_back(level_, generations_[level_], std::move(value));
    return &vec.back().value;
 }
 // ---------------------------------------------------------------------------

@@ -9,20 +9,12 @@ namespace op {
 Kind getBinOpKind(token::Kind tk) {
    assert(tk >= token::Kind::ASTERISK && tk <= token::Kind::COMMA && "Invalid token::Kind to get Kind from");
    assert(tk != token::Kind::QMARK && "Ternary operator not supported"); // todo: (jr) implement ternary operator
+
    return static_cast<Kind>(static_cast<int>(Kind::MUL) + static_cast<int>(tk) - static_cast<int>(token::Kind::ASTERISK));
 }
 // ---------------------------------------------------------------------------
 Kind getBinOpKind(const token::Token& token) {
    return getBinOpKind(token.getKind());
-}
-// ---------------------------------------------------------------------------
-OpSpec getOpSpec(const token::Token& token) {
-   token::Kind tk = token.getKind();
-   if (tk < token::Kind::ASTERISK || tk > token::Kind::COMMA) {
-      return OpSpec{0, false};
-   }
-   op::Kind kind = getBinOpKind(token);
-   return getOpSpec(kind);
 }
 // ---------------------------------------------------------------------------
 OpSpec getOpSpec(const Kind kind) {
@@ -51,6 +43,11 @@ OpSpec getOpSpec(const Kind kind) {
 // ---------------------------------------------------------------------------
 bool isAssignmentOp(const Kind kind) {
    return kind >= Kind::ASSIGN && kind <= Kind::BW_OR_ASSIGN;
+}
+// ---------------------------------------------------------------------------
+// todo: check if this is coorect
+bool isBitwiseOp(const Kind kind) {
+   return kind == Kind::BW_AND || kind == Kind::BW_OR || kind == Kind::BW_XOR || kind == Kind::BW_NOT || kind == Kind::SHL || kind == Kind::SHR || kind == Kind::SHL_ASSIGN || kind == Kind::SHR_ASSIGN || kind == Kind::BW_AND_ASSIGN || kind == Kind::BW_OR_ASSIGN || kind == Kind::BW_XOR_ASSIGN;
 }
 // ---------------------------------------------------------------------------
 std::ostream& operator<<(std::ostream& os, const Kind& kind) {
