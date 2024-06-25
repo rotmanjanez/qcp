@@ -6,10 +6,6 @@ void foo() {
    return 10;
 }
 /* ------- SEPERATOR ------- */
-int foo() {
-   int x = 10;
-}
-/* ------- SEPERATOR ------- */
 int foo() int x = 10;
 return 0;
 }
@@ -24,6 +20,15 @@ foo() {
    return 0;
 }
 /* ------- SEPERATOR ------- */
+int foo() {
+   int x = 10 return 0;
+}
+/* ------- SEPERATOR ------- */
+int foo() {
+   continue;
+   return 0;
+}
+/* ------- SEPERATOR ------- */
 int foo( {
    int x = 10;
    return 0;
@@ -33,6 +38,28 @@ int foo() {
    int arr[];
    return 0;
 }
+/* ------- SEPERATOR ------- */
+int foo();
+char foo() {
+   return 'a';
+}
+/* ------- SEPERATOR ------- */
+int foo() {
+   goto label;
+   return 0;
+}
+/* ------- SEPERATOR ------- */
+double invalid_hex_double_df = 0x1.8p3df;
+/* ------- SEPERATOR ------- */
+double invalid_hex_double_DF = 0x1.8p3DF;
+/* ------- SEPERATOR ------- */
+double invalid_hex_double_DL = 0x1.8p3DL;
+/* ------- SEPERATOR ------- */
+double invalid_hex_double_dd = 0x1.8p3dd;
+/* ------- SEPERATOR ------- */
+double invalid_hex_double_dl = 0x1.8p3dl;
+/* ------- SEPERATOR ------- */
+double invalid_hex_double_DD = 0x1.8p3DD;
 /* ------- SEPERATOR ------- */
 int foo() {
    int arr[-5];
@@ -56,11 +83,6 @@ int foo() {
 }
 /* ------- SEPERATOR ------- */
 int foo() {
-   char c = "A";
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-int foo() {
    int arr[10.5];
    return 0;
 }
@@ -68,6 +90,11 @@ int foo() {
 int foo();
 int foo(x, y) {
    return x + y;
+}
+/* ------- SEPERATOR ------- */
+int foo(int x) {
+   int x = 1;
+   return x;
 }
 /* ------- SEPERATOR ------- */
 int foo() {
@@ -87,12 +114,16 @@ int foo(int val) {
    return val;
 }
 /* ------- SEPERATOR ------- */
+int foo(int x);
+
+int foo(int y) {
+   return x * y;
+}
+/* ------- SEPERATOR ------- */
 int[] foo() {
    static int arr[10];
    return arr;
 }
-/* ------- SEPERATOR ------- */
-int foo(int arg) {} // Error: end of non void function
 /* ------- SEPERATOR ------- */
 int foo(int x);
 int foo(float x) {
@@ -158,6 +189,12 @@ int test5(void) {
    return 0;
 }
 /* ------- SEPERATOR ------- */
+int foo(void, int);
+
+int foo(void, int i) {
+   return i;
+}
+/* ------- SEPERATOR ------- */
 struct Point;
 int foo() {
    struct Point p;
@@ -192,10 +229,42 @@ int test3(void) {
    return 0;
 }
 /* ------- SEPERATOR ------- */
+struct Node {
+   struct Node next;
+   int data;
+} globalNode;
+/* ------- SEPERATOR ------- */
+struct A {
+   int x;
+   struct {
+      int x;
+   };
+} globalA;
+/* ------- SEPERATOR ------- */
 struct Point {
    int x;
    int y;
 } int foo() {
+   return 0;
+}
+/* ------- SEPERATOR ------- */
+int foo(void) {
+   char* invalidChar = "\uD800";
+   return 0;
+}
+/* ------- SEPERATOR ------- */
+int foo() {
+   break;
+   return 0;
+}
+/* ------- SEPERATOR ------- */
+int foo() {
+   void x;
+   return 0;
+}
+/* ------- SEPERATOR ------- */
+int foo(void) {
+   char* invalidChar = "\uDFFF";
    return 0;
 }
 /* ------- SEPERATOR ------- */
@@ -207,10 +276,22 @@ int foo() {
    return 0;
 }
 /* ------- SEPERATOR ------- */
+void foo(void) {
+   int x = 10;
+   void* vp = &x;
+   *vp = 20;
+}
+/* ------- SEPERATOR ------- */
 int foo() {
    float x = 10.5;
    float y = x & 2;
    return 0;
+}
+/* ------- SEPERATOR ------- */
+int foo(int val) {
+   int d = 150;
+   int d = 160;
+   return d;
 }
 /* ------- SEPERATOR ------- */
 typedef int myint;
@@ -219,11 +300,29 @@ int foo() {
    return 0;
 }
 /* ------- SEPERATOR ------- */
+int foo(int x);
+
+int foo(int x) {
+   int y = x + z;
+   return y;
+}
+/* ------- SEPERATOR ------- */
+int foo(int x, int x);
+
+int foo(int x, int y) {
+   return x + y;
+}
+/* ------- SEPERATOR ------- */
 int foo() {
    int bar() {
       return 10;
    }
    return bar();
+}
+/* ------- SEPERATOR ------- */
+int foo(void) {
+   char* invalidChar = "\U00110000";
+   return 0;
 }
 /* ------- SEPERATOR ------- */
 int foo() {
@@ -240,29 +339,9 @@ int foo() {
       return 0;
 }
 /* ------- SEPERATOR ------- */
-int foo() {
-   break;
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-int foo() {
-   void x;
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-int foo() {
-   continue;
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-int foo();
-char foo() {
-   return 'a';
-}
-/* ------- SEPERATOR ------- */
-int foo() {
-   goto label;
-   return 0;
+int invalid_test(void) {
+   int b = invalid_function();
+   return b;
 }
 /* ------- SEPERATOR ------- */
 int foo() {
@@ -273,9 +352,10 @@ int bar() {
    return 10;
 }
 /* ------- SEPERATOR ------- */
-int foo(int x) {
-   int x = 1; // Error, x already defined
-   return x;
+int foo(int arg) {
+   const int value = 0;
+   value = arg;
+   return arg;
 }
 /* ------- SEPERATOR ------- */
 int foo() {
@@ -283,6 +363,33 @@ int foo() {
 }
 int bar() {
    char (*ptr)() = foo;
+   return 0;
+}
+/* ------- SEPERATOR ------- */
+int foo(int val) {
+   return undeclared_var + val;
+}
+
+int undeclared_var = 50;
+/* ------- SEPERATOR ------- */
+int foo(int val) {
+   int arr[3] = {1, 2, 3};
+   arr = &val;
+   return arr[0];
+}
+/* ------- SEPERATOR ------- */
+int foo(int x) {
+   return x;
+}
+int bar() {
+   int y = foo(1, 2);
+   return 0;
+}
+/* ------- SEPERATOR ------- */
+int test(void) {
+   int a = 5;
+   int b = 10;
+   int value = a[b];
    return 0;
 }
 /* ------- SEPERATOR ------- */
@@ -301,23 +408,97 @@ int test(void) {
    return 0;
 }
 /* ------- SEPERATOR ------- */
-struct Point {
+union Data {
    int x;
+   char x;
 };
-int foo() {
-   struct Point p = {.x = 10, .y = 20};
-   return 0;
-}
+/* ------- SEPERATOR ------- */
+int foo(int val) {
+      {
+         int block_var = 10;
+      }
+      return block_var + val;
+   }
+/* ------- SEPERATOR ------- */
+enum Colors { RED,
+                 GREEN,
+                 RED };
+   int foo() {
+      return 0;
+   }
+/* ------- SEPERATOR ------- */
+int foo(int x, int y) {
+      return x + y;
+   }
+   int bar() {
+      int z = foo(1);
+      return 0;
+   }
+/* ------- SEPERATOR ------- */
+int invalid_test(void) {
+      int a = invalid_int;
+      int b = invalid_function();
+      return a + b;
+   }
 /* ------- SEPERATOR ------- */
 struct Point {
-   int x;
-   int y;
-};
+      int x;
+   };
+   int foo() {
+      struct Point p = {.x = 10, .y = 20};
+      return 0;
+   }
+/* ------- SEPERATOR ------- */
+enum Colors { RED,
+                 GREEN,
+                 BLUE };
+   int foo() {
+      Colors color = RED;
+      return 0;
+   }
+/* ------- SEPERATOR ------- */
+int test(void) {
+      double x = 42.0;
+      _Generic(x,
+          int: "int",
+          float: "float");
+           return 0;
+   }
+/* ------- SEPERATOR ------- */
+int test(void) {
+      int x = 42;
+      _Generic(x,
+          default: "default1",
+          default: "default2");
+      return 0;
+   }
+/* ------- SEPERATOR ------- */
+enum Colors { RED,
+                 GREEN,
+                 BLUE };
+   int foo() {
+      enum Colors color = YELLOW;
+      return 0;
+   }
+/* ------- SEPERATOR ------- */
+int test(void) {
+      int x = 42;
+      _Generic(x,
+          int: "int",
+          nonexisting_type: "nonexisting");
+      return 0;
+   }
+/* ------- SEPERATOR ------- */
 int foo() {
-   struct Point p;
-   p.z = 10;
-   return 0;
-}
+      int x = 1;
+      int y = 2;
+      switch (x) {
+         case y:
+            x = 3;
+            break;
+      }
+      return 0;
+   }
 /* ------- SEPERATOR ------- */
 int foo() {
    int x = 10;
@@ -328,224 +509,112 @@ int foo() {
     return 0;
 }
 /* ------- SEPERATOR ------- */
-struct Node {
-   struct Node next;
-   int data;
-} globalNode; // Error: Incomplete type 'struct Node'
+int test4(void) {
+      const int y = 20;
+      const int* p = &y;
+      (*p)++;
+      return 0;
+   }
 /* ------- SEPERATOR ------- */
-void foo(void) {
-   int x = 10;
-   void* vp = &x;
-   *vp = 20; // Error: assigning to void expression
-}
-/* ------- SEPERATOR ------- */
-// Edge Case 4: Invalid Function prototype
-int foo(void, int);
-
-int foo(void, int i) {
-   return i;
-}
+struct Point {
+      int x;
+      int y;
+   };
+   int foo() {
+      struct Point p;
+      p.z = 10;
+      return 0;
+   }
 /* ------- SEPERATOR ------- */
 struct Incomplete;
 
-struct Incomplete test(struct Incomplete* arr) {
-   int index = 5;
-   return arr[index];
-}
-/* ------- SEPERATOR ------- */
-enum Colors { RED,
-              GREEN,
-              BLUE };
-int foo() {
-   Colors color = RED;
-   return 0;
-}
+   struct Incomplete test(struct Incomplete * arr) {
+      int index = 5;
+      return arr[index];
+   }
 /* ------- SEPERATOR ------- */
 struct A {
-   struct {
       int x;
-      struct {
+      struct B {
          int y;
-      };
-   };
-} globalA;
-
-int y = globalA.y;
-/* ------- SEPERATOR ------- */
-struct A {
-   int x;
-   struct {
-      int x; // Error: anonymous struct with member of same name
-   };
-} globalA;
-/* ------- SEPERATOR ------- */
-enum Colors { RED,
-              GREEN,
-              BLUE };
-int foo() {
-   enum Colors color = YELLOW;
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-union Data {
-   int x;
-   char x;
-};
-/* ------- SEPERATOR ------- */
-int foo(int val) {
-   return undeclared_var + val;
-}
-
-int undeclared_var = 50;
-/* ------- SEPERATOR ------- */
-int foo(int x) {
-   return x;
-}
-int bar() {
-   int y = foo(1, 2);
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-int test(void) {
-   int a = 5;
-   int b = 10;
-   int value = a[b];
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-int foo() {
-   int x = 1;
-   int y = 2;
-   switch (x) {
-      case y:
-           x = 3;
-           break;
-   }
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-int foo() {
-   int x = 10;
-   switch (x) {
-      case 1:
-         break;
-      case 1:
-         break;
-   }
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-int foo(int val) {
-   int arr[3] = {1, 2, 3};
-   arr = &val; // Error: assignment to expression with array type
-   return arr[0];
-}
-/* ------- SEPERATOR ------- */
-struct A {
-   int x;
-   struct B {
-      int y;
-   } b;
-} globalA1;
-
-struct A {
-   int z;
-} globalA2; // Error: Redefinition of 'struct A'
-/* ------- SEPERATOR ------- */
-int foo() {
-   int x = 1;
-   switch (x) {
-      case 1:
-         break;
-      default:
-         break;
-      default:
-         break;
-   }
-   return 0;
-}
+      } b;
+   } globalA1;
+   struct A {
+      int z;
+   } globalA2;
 /* ------- SEPERATOR ------- */
 typedef struct {
-   int x;
-} MyStruct;
-
-MyStruct globalMyStruct;
-
-struct MyStruct {
-   int y;
-} globalStruct; // Error: Conflicting declaration 'struct MyStruct'
-/* ------- SEPERATOR ------- */
-int foo() {
-   int x = 10 return 0;
-}
-/* ------- SEPERATOR ------- */
-enum Colors { RED,
-              GREEN,
-              RED };
-int foo() {
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-int foo(int x, int y) {
-   return x + y;
-}
-int bar() {
-   int z = foo(1);
-   return 0;
-}
+      int x;
+   } MyStruct;
+   MyStruct globalMyStruct;
+   struct MyStruct {
+      int y;
+   } globalStruct;
 /* ------- SEPERATOR ------- */
 int test(void) {
-   int x = 42;
-   _Generic(x,
-       int: "int",
-       nonexisting_type: "nonexisting");
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-// Invalid Example 2: Conflicting declarations in the same scope
-int foo(int val) {
-   int d = 150;
-   int d = 160; // Error: redeclaration of 'd'
-   return d;
-}
-/* ------- SEPERATOR ------- */
-int foo(int val) {
-   {
-      int block_var = 10;
+      int x = 42;
+      _Generic(x,
+          int: "int",
+          signed int: "signed int");
+      return 0;
    }
-   return block_var + val;
-}
+/* ------- SEPERATOR ------- */
+int foo() {
+      int x = 10;
+      switch (x) {
+         case 1:
+            break;
+         case 1:
+            break;
+      }
+      return 0;
+   }
+/* ------- SEPERATOR ------- */
+int foo() {
+      int x = 1;
+      switch (x) {
+         case 1:
+            break;
+         default:
+            break;
+         default:
+            break;
+      }
+      return 0;
+   }
+/* ------- SEPERATOR ------- */
+struct A {
+      struct {
+         int x;
+         struct {
+            int y;
+         };
+      };
+   } globalA;
+
+   int y = globalA.y;
+/* ------- SEPERATOR ------- */
+struct incomplete_type;
+
+   int test(void) {
+      int x = 42;
+      _Generic(x,
+          int: "int",
+          struct incomplete_type: "incomplete");
+      return 0;
+   }
 /* ------- SEPERATOR ------- */
 struct Point {
-   int x;
-   int y;
-};
-union Data {
-   struct Point point;
-   int z;
-};
-int foo() {
-   struct Point p;
-   union Data data;
-   p = data;
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-int foo(int x);
-
-int foo(int x) {
-   int y = x + z; // Error: 'z' is not declared
-   return y;
-}
-/* ------- SEPERATOR ------- */
-int foo(int x);
-
-int foo(int y) { // Error: 'x' is not declared in this scope
-   return x * y;
-}
-/* ------- SEPERATOR ------- */
-int foo(int x, int x); // Error: redeclaration of parameter 'x'
-
-int foo(int x, int y) {
-   return x + y;
-}
+      int x;
+      int y;
+   };
+   union Data {
+      struct Point point;
+      int z;
+   };
+   int foo() {
+      struct Point p;
+      union Data data;
+      p = data;
+      return 0;
+   }
