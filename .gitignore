@@ -1,5 +1,10 @@
-include/keywords.h
-
 build/*
 .vscode/*
+
+test/tests2/*
+test/test1/*
+test/diagnostics/*
+
+
+Dockerfile
 
