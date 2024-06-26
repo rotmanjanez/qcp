@@ -12,32 +12,19 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -Wall -Wextra -Wpedantic -fsanitize=undefined")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -Wall -Wextra -Wpedantic -fsanitize=undefined -ftemplate-backtrace-limit=0")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
-set(SCMAKE_CXX_COMPILER "g++")
-
-# ---------------------------------------------------------------------------
-# Packages
-# ---------------------------------------------------------------------------
-
-# LLVM
-find_package(LLVM REQUIRED CONFIG)
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${LLVM_CMAKE_DIR}")
-include(AddLLVM)
-include_directories(SYSTEM ${LLVM_INCLUDE_DIRS})
-add_definitions(${LLVM_DEFINITIONS})
-llvm_map_components_to_libnames(llvm core)
 
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
 include("${CMAKE_SOURCE_DIR}/clang-tidy.cmake")
 include("${CMAKE_SOURCE_DIR}/gperf.cmake")
+
 include("${CMAKE_SOURCE_DIR}/vendor/googletest.cmake")
 include("${CMAKE_SOURCE_DIR}/vendor/csmith.cmake")
 include("${CMAKE_SOURCE_DIR}/vendor/benchmark.cmake")
-
-# include("${CMAKE_SOURCE_DIR}/vendor/alive2.cmake")
+include("${CMAKE_SOURCE_DIR}/vendor/musl.cmake")
 
 # ---------------------------------------------------------------------------
 # Includes
@@ -49,12 +36,24 @@ include_directories(
     ${BENCHMARK_INCLUDE_DIR}
 )
 
+find_package(LLVM REQUIRED CONFIG)
+
+message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+llvm_map_components_to_libnames(llvm core)
+
+message(STATUS "Components mapped to libnames: ${llvm}")
+add_definitions(${LLVM_DEFINITIONS})
+include_directories(SYSTEM ${LLVM_INCLUDE_DIR})
+
 # ---------------------------------------------------------------------------
 # Sources
 # ---------------------------------------------------------------------------
 set(INCLUDE_H
+    "${CMAKE_SOURCE_DIR}/include/keywords.h"
     "${CMAKE_SOURCE_DIR}/include/token.h"
     "${CMAKE_SOURCE_DIR}/include/tokenizer.h"
+    "${CMAKE_SOURCE_DIR}/include/tokencounter.h"
     "${CMAKE_SOURCE_DIR}/include/keywords.h"
     "${CMAKE_SOURCE_DIR}/include/diagnostics.h"
     "${CMAKE_SOURCE_DIR}/include/parser.h"
@@ -67,6 +66,8 @@ set(INCLUDE_H
     "${CMAKE_SOURCE_DIR}/include/tracer.h"
     "${CMAKE_SOURCE_DIR}/include/stringpool.h"
     "${CMAKE_SOURCE_DIR}/include/expr.h"
+    "${CMAKE_SOURCE_DIR}/include/emittertraits.h"
+    "${CMAKE_SOURCE_DIR}/include/scopeinfo.h"
     "${CMAKE_SOURCE_DIR}/include/llvmemitter.h"
     "${CMAKE_SOURCE_DIR}/include/defs/defines.def"
     "${CMAKE_SOURCE_DIR}/include/defs/tokens.def"
@@ -76,7 +77,10 @@ set(INCLUDE_H
 )
 
 set(SRC_CC
+    "${CMAKE_SOURCE_DIR}/src/keywords.cc"
     "${CMAKE_SOURCE_DIR}/src/token.cc"
+    "${CMAKE_SOURCE_DIR}/src/tokenizer.cc"
+    "${CMAKE_SOURCE_DIR}/src/loc.cc"
     "${CMAKE_SOURCE_DIR}/src/operator.cc"
     "${CMAKE_SOURCE_DIR}/src/diagnostics.cc"
     "${CMAKE_SOURCE_DIR}/src/stringpool.cc"
@@ -118,6 +122,7 @@ add_test(qcp tester)
 
 # copy test1 folder to build directory
 file(COPY ${CMAKE_SOURCE_DIR}/test/test1 DESTINATION ${CMAKE_BINARY_DIR})
+file(COPY ${CMAKE_SOURCE_DIR}/test/diagnostics DESTINATION ${CMAKE_BINARY_DIR})
 
 # ---------------------------------------------------------------------------
 # Benchmarks
