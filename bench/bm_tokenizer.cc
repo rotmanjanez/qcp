@@ -9,7 +9,7 @@ void Tokenizer(benchmark::State& state) {
    std::string src{qcp::tool::random_c_program("gcc", 0)};
    std::size_t n = 0;
    for (auto _ : state) {
-      qcp::DiagnosticTracker diag{src};
+      qcp::DiagnosticTracker diag{"<csmith>", src};
       qcp::Tokenizer ts{src, diag};
       for (auto token : ts) {
          ++n;
