@@ -4,6 +4,7 @@
 // qcp
 // ---------------------------------------------------------------------------
 #include <string_view>
+#include <string>
 #include <vector>
 // ---------------------------------------------------------------------------
 namespace qcp {
@@ -123,8 +124,8 @@ std::ostream& operator<<(std::ostream& os, const tagged<T>& t) {
 namespace std {
 // ---------------------------------------------------------------------------
 template <>
-struct std::hash<qcp::Ident> {
-   std::size_t operator()(qcp::Ident const& i) const noexcept {
+struct hash<qcp::Ident> {
+   size_t operator()(qcp::Ident const& i) const noexcept {
       return hash<unsigned>{}(i.tag);
    }
 };

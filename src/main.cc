@@ -12,6 +12,9 @@ using Parser = qcp::Parser<qcp::emitter::LLVMEmitter>;
 // ---------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
    std::ifstream file(argv[1]);
+   if (!file) {
+      std::cerr << argv[1] << " no such file\n";
+   }
    std::string code((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
    // print code

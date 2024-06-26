@@ -13,6 +13,7 @@
 #include <sstream>
 #include <variant>
 #include <vector>
+#include <cstdint>
 // ---------------------------------------------------------------------------
 #define VARIANT_ACCESS_METHODS(name, type, member) \
    type& name() { return std::get<type>(data_); }  \
@@ -259,7 +260,7 @@ struct Base {
          return &*memberIt_;
       }
 
-      const std::vector<uint32_t>& GEPDerefValues() const {
+      const std::vector<std::uint32_t>& GEPDerefValues() const {
          return indices_;
       }
 
@@ -269,7 +270,7 @@ struct Base {
       }
 
       const Base* root;
-      std::vector<uint32_t> indices_;
+      std::vector<std::uint32_t> indices_;
       // these are denormalizations for performance reasons
       std::size_t parentMemberSize;
       std::vector<tagged<Type>>::const_iterator memberIt_;

@@ -1,4 +1,6 @@
-find_program(GPERF_EXECUTABLE NAMES gperf)
+find_program(GPERF_EXECUTABLE NAMES gperf REQUIRED)
+
+message("       [GPERF_EXECUTABLE] = ${GPERF_EXECUTABLE}")
 
 add_custom_command(OUTPUT "${CMAKE_SOURCE_DIR}/src/keywords.cc"
     COMMAND ${GPERF_EXECUTABLE} --output-file=${CMAKE_SOURCE_DIR}/src/keywords.cc ${CMAKE_SOURCE_DIR}/src/keywords.gperf)

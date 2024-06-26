@@ -1,5 +1,5 @@
 /* C++ code produced by gperf version 3.1 */
-/* Command-line: /opt/homebrew/bin/gperf --output-file=/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.cc /Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf  */
+/* Command-line: /usr/bin/gperf --output-file=/home/joshy/university/bacherlorthesis/qcp/src/keywords.cc /home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf  */
 /* Computed positions: -k'1,$' */
 
 #if !((' ' == 32) && ('!' == 33) && ('"' == 34) && ('#' == 35) \
@@ -29,7 +29,7 @@
 #error "gperf generated tables don't work with this execution character set. Please report a bug to <bug-gperf@gnu.org>."
 #endif
 
-#line 10 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 10 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
 
 #ifndef QCP_TOKEN_RESERVED_KEYWORD_HASH_H
 #define QCP_TOKEN_RESERVED_KEYWORD_HASH_H
@@ -46,7 +46,7 @@ using TK = qcp::token::Kind;
 namespace qcp {
 namespace token {
 // ---------------------------------------------------------------------------
-#line 27 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 27 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
 struct GPerfToken;
 /* maximum key range = 74, duplicates = 0 */
 
@@ -117,132 +117,132 @@ ReservedKeywordHash::isInWordSet (const char *str, size_t len)
   static const struct GPerfToken wordlist[] =
     {
       {""}, {""}, {""}, {""}, {""}, {""},
-#line 67 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 67 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"switch", static_cast<int>(TK::SWITCH)},
       {""},
-#line 30 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 30 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Alignas", static_cast<int>(TK::ALIGNAS)},
       {""},
-#line 60 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 60 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"short", static_cast<int>(TK::SHORT)},
-#line 66 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 66 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"struct", static_cast<int>(TK::STRUCT)},
-#line 80 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 80 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_BitInt", static_cast<int>(TK::BITINT)},
-#line 81 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 81 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Complex", static_cast<int>(TK::COMPLEX)},
-#line 76 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 76 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"void", static_cast<int>(TK::VOID)},
-#line 86 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 86 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Imaginary", static_cast<int>(TK::IMAGINARY)},
-#line 61 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 61 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"signed", static_cast<int>(TK::SIGNED)},
-#line 43 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 43 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"do", static_cast<int>(TK::DO)},
-#line 64 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 64 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"static_assert", static_cast<int>(TK::STATIC_ASSERT)},
-#line 65 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 65 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Static_assert", static_cast<int>(TK::STATIC_ASSERT)},
-#line 36 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 36 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"break", static_cast<int>(TK::BREAK)},
-#line 62 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 62 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"sizeof", static_cast<int>(TK::SIZEOF)},
-#line 42 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 42 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"default", static_cast<int>(TK::DEFAULT)},
-#line 32 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 32 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Alignof", static_cast<int>(TK::ALIGNOF)},
-#line 87 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 87 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Noreturn", static_cast<int>(TK::NORETURN)},
-#line 49 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 49 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"float", static_cast<int>(TK::FLOAT)},
-#line 72 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 72 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"typeof", static_cast<int>(TK::TYPEOF)},
-#line 71 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 71 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"typedef", static_cast<int>(TK::TYPEDEF)},
-#line 77 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 77 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"volatile", static_cast<int>(TK::VOLATILE)},
-#line 70 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 70 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"true", static_cast<int>(TK::TRUE)},
-#line 78 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 78 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"while", static_cast<int>(TK::WHILE)},
-#line 63 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 63 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"static", static_cast<int>(TK::STATIC)},
-#line 79 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 79 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Atomic", static_cast<int>(TK::ATOMIC)},
-#line 85 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 85 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Generic", static_cast<int>(TK::GENERIC)},
-#line 51 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 51 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"goto", static_cast<int>(TK::GOTO)},
-#line 39 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 39 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"const", static_cast<int>(TK::CONST)},
-#line 44 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 44 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"double", static_cast<int>(TK::DOUBLE)},
-#line 29 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 29 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"alignas", static_cast<int>(TK::ALIGNAS)},
-#line 58 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 58 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"restrict", static_cast<int>(TK::RESTRICT)},
-#line 33 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 33 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"auto", static_cast<int>(TK::AUTO)},
-#line 48 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 48 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"false", static_cast<int>(TK::FALSE)},
-#line 47 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 47 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"extern", static_cast<int>(TK::EXTERN)},
       {""},
-#line 50 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 50 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"for", static_cast<int>(TK::FOR)},
-#line 45 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 45 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"else", static_cast<int>(TK::ELSE)},
-#line 84 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 84 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Decimal64", static_cast<int>(TK::DECIMAL64)},
-#line 59 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 59 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"return", static_cast<int>(TK::RETURN)},
-#line 56 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 56 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"nullptr", static_cast<int>(TK::NULLPTR)},
-#line 54 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 54 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"int", static_cast<int>(TK::INT)},
-#line 37 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 37 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"case", static_cast<int>(TK::CASE)},
-#line 83 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 83 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Decimal32", static_cast<int>(TK::DECIMAL32)},
-#line 82 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 82 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Decimal128", static_cast<int>(TK::DECIMAL128)},
-#line 31 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 31 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"alignof", static_cast<int>(TK::ALIGNOF)},
-#line 41 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 41 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"continue", static_cast<int>(TK::CONTINUE)},
-#line 38 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 38 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"char", static_cast<int>(TK::CHAR)},
-#line 35 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 35 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Bool", static_cast<int>(TK::BOOL)},
       {""},
-#line 52 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 52 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"if", static_cast<int>(TK::IF)},
-#line 57 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 57 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"register", static_cast<int>(TK::REGISTER)},
-#line 40 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 40 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"constexpr", static_cast<int>(TK::CONSTEXPR)},
       {""}, {""}, {""},
-#line 69 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 69 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"_Thread_local", static_cast<int>(TK::THREAD_LOCAL)},
-#line 46 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 46 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"enum", static_cast<int>(TK::ENUM)},
       {""},
-#line 53 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 53 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"inline", static_cast<int>(TK::INLINE)},
-#line 68 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 68 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"thread_local", static_cast<int>(TK::THREAD_LOCAL)},
-#line 73 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 73 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"typeof_unqual", static_cast<int>(TK::TYPEOF_UNQUAL)},
-#line 34 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 34 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"bool", static_cast<int>(TK::BOOL)},
       {""}, {""}, {""},
-#line 75 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 75 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"unsigned", static_cast<int>(TK::UNSIGNED)},
       {""},
-#line 74 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 74 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"union", static_cast<int>(TK::UNION)},
       {""}, {""}, {""},
-#line 55 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 55 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
       {"long", static_cast<int>(TK::LONG)}
     };
 
@@ -261,7 +261,7 @@ ReservedKeywordHash::isInWordSet (const char *str, size_t len)
     }
   return 0;
 }
-#line 88 "/Users/janezrotman/Documents/Studium/Sem_8/BA/qcp/src/keywords.gperf"
+#line 88 "/home/joshy/university/bacherlorthesis/qcp/src/keywords.gperf"
 
 // ---------------------------------------------------------------------------
 } // end namespace token

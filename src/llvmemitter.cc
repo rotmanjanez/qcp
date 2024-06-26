@@ -151,7 +151,7 @@ typename LLVMEmitter::const_or_iconst_t toQCPConstant(llvm::Constant* val) {
    return val;
 }
 // ---------------------------------------------------------------------------
-llvm::Constant* llvmUint32T(llvm::LLVMContext& Ctx, uint32_t val) {
+llvm::Constant* llvmUint32T(llvm::LLVMContext& Ctx, std::uint32_t val) {
    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), val);
 }
 // ---------------------------------------------------------------------------
@@ -484,8 +484,8 @@ typename LLVMEmitter::ssa_t* LLVMEmitter::emitGEP(bb_t* bb, Type ty, value_t ptr
    return emitGEPImpl(bb, ty, asLLVMValue(ptr), idx, name, [this](uint64_t val) { return llvmUint64T(Ctx, val); });
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitGEP(bb_t* bb, Type ty, value_t ptr, std::span<const uint32_t> idx, Ident name) {
-   return emitGEPImpl(bb, ty, asLLVMValue(ptr), idx, name, [this](uint32_t val) { return llvmUint32T(Ctx, val); });
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitGEP(bb_t* bb, Type ty, value_t ptr, std::span<const std::uint32_t> idx, Ident name) {
+   return emitGEPImpl(bb, ty, asLLVMValue(ptr), idx, name, [this](std::uint32_t val) { return llvmUint32T(Ctx, val); });
 }
 // ---------------------------------------------------------------------------
 typename LLVMEmitter::sw_t* LLVMEmitter::emitSwitch(bb_t* bb, value_t value) {

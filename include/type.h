@@ -39,20 +39,19 @@ class TypeFactory;
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
 class Type {
-   using Base = Base<_EmitterT>;
-   using TypeFactory = TypeFactory<_EmitterT>;
+   using BaseType = Base<_EmitterT>;
    using Token = token::Token;
    using ty_t = typename _EmitterT::ty_t;
 
    template <typename T>
    friend std::ostream& operator<<(std::ostream& os, const Type<T>& ty);
 
-   friend TypeFactory;
+   friend TypeFactory<_EmitterT>;
    // sfriend typename TypeFactory::DeclTypeBaseRef;
    // friend typename Base::const_member_iterator;
 
-   explicit Type(std::pair<unsigned short, std::vector<Base>&> ini) : index_{ini.first}, types_{&ini.second} {}
-   Type(std::vector<Base>& types, unsigned short index) : index_{index}, types_{&types} {}
+   explicit Type(std::pair<unsigned short, std::vector<BaseType>&> ini) : index_{ini.first}, types_{&ini.second} {}
+   Type(std::vector<BaseType>& types, unsigned short index) : index_{index}, types_{&types} {}
 
    public:
    // todo: change to bit flags
@@ -142,11 +141,11 @@ class Type {
       return static_cast<ty_t*>(**this);
    }
 
-   const Base* operator->() const {
+   const BaseType* operator->() const {
       return &**this;
    }
 
-   const Base& operator*() const {
+   const BaseType& operator*() const {
       assert(types_ && "Type is not initialized");
       return (*types_)[index_];
    }
@@ -156,7 +155,7 @@ class Type {
    private:
    // todo: maybe short is not enough
    unsigned short index_;
-   std::vector<Base>* types_;
+   std::vector<BaseType>* types_;
 };
 // ---------------------------------------------------------------------------
 // Type

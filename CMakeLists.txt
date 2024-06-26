@@ -24,7 +24,7 @@ include("${CMAKE_SOURCE_DIR}/gperf.cmake")
 include("${CMAKE_SOURCE_DIR}/vendor/googletest.cmake")
 include("${CMAKE_SOURCE_DIR}/vendor/csmith.cmake")
 include("${CMAKE_SOURCE_DIR}/vendor/benchmark.cmake")
-include("${CMAKE_SOURCE_DIR}/vendor/musl.cmake")
+# include("${CMAKE_SOURCE_DIR}/vendor/musl.cmake")
 
 # ---------------------------------------------------------------------------
 # Includes

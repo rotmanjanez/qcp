@@ -173,7 +173,7 @@ class LLVMEmitter {
    ssa_t* emitCall(bb_t* bb, Type fnTy, ssa_t* fnPtr, std::span<const value_t> args, Ident name = Ident());
 
    ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, std::span<const uint64_t> idx, Ident name = Ident());
-   ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, std::span<const uint32_t> idx, Ident name = Ident());
+   ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, std::span<const std::uint32_t> idx, Ident name = Ident());
    ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, value_t idx, Ident name = Ident());
 
    sw_t* emitSwitch(bb_t* bb, value_t value);

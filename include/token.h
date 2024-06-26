@@ -11,6 +11,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <variant>
 // ---------------------------------------------------------------------------
 namespace qcp {
 namespace token {

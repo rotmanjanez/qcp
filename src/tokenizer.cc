@@ -7,6 +7,7 @@
 #include <cassert>
 #include <string_view>
 #include <utility>
+#include <array>
 // ---------------------------------------------------------------------------
 using sv_it = typename std::string_view::const_iterator;
 // ---------------------------------------------------------------------------
