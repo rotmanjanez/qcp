@@ -11,20 +11,42 @@ namespace qcp {
 // DiagnosticMessage
 // ---------------------------------------------------------------------------
 std::vector<long long>::const_iterator DiagnosticMessage::findLineBegin() const {
-   return std::lower_bound(tracker_.lineBreaks_.begin(), tracker_.lineBreaks_.end(), loc_.value().loc()) - 1;
+   auto it = std::lower_bound(tracker_.lineBreaks_.begin(), tracker_.lineBreaks_.end(), loc_.value().loc());
+   assert(it != tracker_.lineBreaks_.begin());
+   return it - 1;
 }
 // ---------------------------------------------------------------------------
-std::size_t DiagnosticMessage::line() const {
-   if (tracker_.lineBreaks_.back() < loc_.value().loc()) {
-      return tracker_.lineBreaks_.size();
-   }
+std::map<std::size_t, std::pair<std::string, std::size_t>>::const_iterator DiagnosticMessage::findFileBegin() const {
+   auto it = tracker_.fileStack_.lower_bound(translationUnitLine());
+   assert(it != tracker_.fileStack_.begin());
+   return --it;
+}
+// ---------------------------------------------------------------------------
+std::size_t DiagnosticMessage::translationUnitLine() const {
    return std::distance(tracker_.lineBreaks_.begin(), findLineBegin()) + 1;
 }
 // ---------------------------------------------------------------------------
+std::size_t DiagnosticMessage::line() const {
+   auto fileIt = findFileBegin();
+   std::size_t fileOffset = fileIt->second.second;
+   // if (tracker_.lineBreaks_.back() < loc_.value().loc()) {
+   //    return fileOffset tracker_.lineBreaks_.size();
+   // }
+   return translationUnitLine() - fileIt->first + fileOffset;
+}
+// ---------------------------------------------------------------------------
 std::size_t DiagnosticMessage::column() const {
-   std::size_t lineNo = line();
+   std::size_t lineNo = translationUnitLine();
    auto lineBegin = tracker_.lineBreaks_[lineNo - 1];
    return loc_.value().loc() - lineBegin;
+}
+// ---------------------------------------------------------------------------
+std::string_view DiagnosticMessage::file() const {
+   auto it = findFileBegin();
+   if (it == tracker_.fileStack_.end()) {
+      return {};
+   }
+   return it->second.first;
 }
 // ---------------------------------------------------------------------------
 std::string_view DiagnosticMessage::getSourceLine() const {
@@ -43,7 +65,7 @@ std::string_view DiagnosticMessage::getSourceLine() const {
 std::ostream& operator<<(std::ostream& os, const DiagnosticMessage& diag) {
    if (diag.loc_.has_value()) {
       std::string lineNo = std::to_string(diag.line());
-      os << diag.tracker_.filename << ':' << diag.line() << ':' << diag.column() << ": ";
+      os << diag.file() << ':' << lineNo << ':' << diag.column() << ": ";
       switch (diag.kind()) {
          case DiagnosticMessage::Kind::INFO:
             os << "info: ";

@@ -16,8 +16,8 @@
 // ---------------------------------------------------------------------------
 #include <array>
 #include <iostream>
+#include <span>
 #include <variant>
-#include <vector>
 // ---------------------------------------------------------------------------
 namespace qcp {
 // ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ class LLVMEmitter {
 
    ty_t* emitArrayTy(Type ty, iconst_t* size);
 
-   ty_t* emitStructTy(const std::vector<Type>& tys, bool incomplete, Ident name = Ident());
+   ty_t* emitStructTy(std::span<const Type> tys, bool incomplete, Ident name = Ident());
 
    ssa_t* emitUndef();
 
@@ -123,12 +123,12 @@ class LLVMEmitter {
 
    const_t* emitNullPtr(Type ty);
 
-   const_t* emitArrayConst(Type ty, const std::vector<const_or_iconst_t>& values);
+   const_t* emitArrayConst(Type ty, std::span<const const_or_iconst_t> values);
    const_t* emitArrayConst(Type ty, const_or_iconst_t value);
 
-   const_t* emitStructConst(Type ty, const std::vector<const_or_iconst_t>& values);
+   const_t* emitStructConst(Type ty, std::span<const const_or_iconst_t> values);
 
-   // todo: const_t* emitConstDaraArray(Type ty, const std::vector<const_or_iconst_t>& values);
+   // todo: const_t* emitConstDaraArray(Type ty, std::span<const const_or_iconst_t> values);
 
    const_t* emitStringLiteral(const std::string_view str);
 
@@ -168,13 +168,12 @@ class LLVMEmitter {
 
    ssa_t* emitCast(bb_t* bb, Type fromTy, ssa_t* val, Type toTy, qcp::type::Cast cast);
 
-   ssa_t* emitCall(bb_t* bb, fn_t* fn, const std::vector<value_t>& args, Ident name = Ident());
+   ssa_t* emitCall(bb_t* bb, fn_t* fn, std::span<const value_t> args, Ident name = Ident());
 
-   ssa_t* emitCall(bb_t* bb, Type fnTy, ssa_t* fnPtr, const std::vector<value_t>& args, Ident name = Ident());
+   ssa_t* emitCall(bb_t* bb, Type fnTy, ssa_t* fnPtr, std::span<const value_t> args, Ident name = Ident());
 
-   ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, std::array<uint64_t, 2> idx, Ident name = Ident());
-   ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, std::array<uint32_t, 2> idx, Ident name = Ident());
-   ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, std::array<uint32_t, 3> idx, Ident name = Ident());
+   ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, std::span<const uint64_t> idx, Ident name = Ident());
+   ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, std::span<const uint32_t> idx, Ident name = Ident());
    ssa_t* emitGEP(bb_t* bb, Type ty, value_t ptr, value_t idx, Ident name = Ident());
 
    sw_t* emitSwitch(bb_t* bb, value_t value);
@@ -184,9 +183,10 @@ class LLVMEmitter {
    void addSwitchDefault(sw_t* sw, bb_t* target);
 
    private:
-   ssa_t* emitGEPImpl(bb_t* bb, Type ty, value_t ptr, std::array<ssa_t*, 3> idx, Ident name);
+   template <typename T, typename Fn>
+   ssa_t* emitGEPImpl(bb_t* bb, Type ty, value_t ptr, std::span<T> indices, Ident name, Fn fn);
 
-   ssa_t* emitCall(bb_t* bb, llvm::FunctionCallee fn, const std::vector<value_t>& args, Ident name = Ident());
+   ssa_t* emitCall(bb_t* bb, llvm::FunctionCallee fn, std::span<const value_t> args, Ident name = Ident());
    ssa_t* emitAllocaImpl(bb_t* bb, Type ty, ssa_t* size, Ident name, bool insertAtBegin);
 
    llvm::LLVMContext Ctx;
@@ -194,6 +194,26 @@ class LLVMEmitter {
    llvm::Module* Mod;
    llvm::IRBuilder<> Builder;
 };
+// ---------------------------------------------------------------------------
+inline typename LLVMEmitter::ssa_t* asLLVMValue(const typename LLVMEmitter::value_t& val) {
+   if (typename LLVMEmitter::ssa_t* const* ssa = std::get_if<typename LLVMEmitter::ssa_t*>(&val)) {
+      return *ssa;
+   } else if (typename LLVMEmitter::iconst_t* const* iconst = std::get_if<typename LLVMEmitter::iconst_t*>(&val)) {
+      return *iconst;
+   }
+   return std::get<typename LLVMEmitter::const_t*>(val);
+}
+// ---------------------------------------------------------------------------
+template <typename T, typename Fn>
+typename LLVMEmitter::ssa_t* LLVMEmitter::emitGEPImpl(bb_t* bb, Type ty, value_t ptr, std::span<T> indices, Ident name, Fn fn) {
+   Builder.SetInsertPoint(bb);
+   std::vector<llvm::Value*> llvmindices;
+   llvmindices.reserve(indices.size());
+   for (auto& i : indices) {
+      llvmindices.push_back(fn(i));
+   }
+   return Builder.CreateGEP(static_cast<ty_t*>(ty), asLLVMValue(ptr), llvmindices, static_cast<std::string>(name).c_str());
+}
 // ---------------------------------------------------------------------------
 } // namespace emitter
 } // namespace qcp

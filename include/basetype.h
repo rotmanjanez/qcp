@@ -6,6 +6,7 @@
 #include "emittertraits.h"
 #include "operator.h"
 #include "token.h"
+#include "type.h"
 // ---------------------------------------------------------------------------
 #include <algorithm>
 #include <compare>
@@ -33,7 +34,7 @@ class TypeFactory;
 template <typename _EmitterT>
 struct Base {
    using Type = Type<_EmitterT>;
-   using TaggedTY = TaggedType<_EmitterT>;
+   using TaggedType = tagged<Type>;
    using ty_t = typename _EmitterT::ty_t;
    using ssa_t = typename _EmitterT::ssa_t;
    using iconst_t = typename _EmitterT::iconst_t;
@@ -70,12 +71,12 @@ struct Base {
    Base(Type retTy, const std::vector<Type>& paramTys, bool isVarArgFnTy) : kind_{Kind::FN_T}, data_{FnTy{paramTys, retTy, isVarArgFnTy}} {}
 
    // Struct or Union type
-   Base(token::Kind tk, std::vector<TaggedTY> members, bool incomplete, Ident tag) : kind_{tk == token::Kind::STRUCT ? Kind::STRUCT_T : Kind::UNION_T}, data_{StructOrUnionTy{incomplete, tag, members}} {
+   Base(token::Kind tk, std::vector<tagged<Type>> members, bool incomplete, Ident tag) : kind_{tk == token::Kind::STRUCT ? Kind::STRUCT_T : Kind::UNION_T}, data_{StructOrUnionTy{incomplete, tag, members}} {
       assert(tk == token::Kind::STRUCT || tk == token::Kind::UNION && "Invalid token::Kind for struct or union");
    }
 
    // Enum type
-   Base(Type underlyingType, Ident tag) : kind_{Kind::ENUM_T}, data_{EnumTy{tag, underlyingType}} {}
+   Base(Type underlyingType, bool fixedUnerlyingTy, Ident tag) : kind_{Kind::ENUM_T}, data_{EnumTy{tag, fixedUnerlyingTy, underlyingType}} {}
 
    Base(const Base&) = default;
    Base(Base&&) = default;
@@ -121,6 +122,8 @@ struct Base {
    Ident getTag() const {
       if (kind_ == Kind::STRUCT_T || kind_ == Kind::UNION_T) {
          return structOrUnionTy().tag;
+      } else if (kind_ == Kind::ENUM_T) {
+         return enumTy().tag;
       }
       return Ident();
    }
@@ -166,12 +169,12 @@ struct Base {
          for (size_t i = 0; i < structOrUnionTy().members.size(); ++i) {
             auto thisMember = structOrUnionTy().members[i];
             auto otherMember = other.structOrUnionTy().members[i];
-            if (!thisMember.ty.isCompatibleWith(otherMember.ty)) {
+            if (!thisMember.isCompatibleWith(otherMember)) {
                return false;
             }
             // todo: alignemt specifier
-            if (thisMember.name || otherMember.name) {
-               return thisMember.name == otherMember.name;
+            if (thisMember.name() || otherMember.name()) {
+               return thisMember.name() == otherMember.name();
             }
          }
       }
@@ -182,11 +185,107 @@ struct Base {
    const std::vector<Type>& getParamTys() const;
    Type getElemTy() const;
    Type getPointedToTy() const;
-   const std::vector<TaggedTY>& getMembers() const;
+   const std::vector<tagged<Type>>& getMembers() const;
    std::size_t getArraySize() const;
    Type getUnderlyingTy() const { return enumTy().underlyingType; }
 
    Kind kind() const { return kind_; }
+
+   class const_member_iterator {
+      public:
+      using value_type = const tagged<Type>;
+      using reference = const tagged<Type>&;
+      using pointer = const tagged<Type>*;
+      using iterator_category = std::input_iterator_tag;
+      using difference_type = std::ptrdiff_t;
+
+      const_member_iterator() : root{nullptr}, indices_{0, 0}, parentMemberSize{0}, memberIt_{} {}
+      const_member_iterator(const Base& root) : root{&root}, indices_{0, 0}, parentMemberSize{root.getMembers().size()}, memberIt_{root.getMembers().begin()} {
+         const Base* parent = &root;
+         if (memberIt_ == parent->getMembers().end()) {
+            return;
+         }
+         indices_.push_back(0);
+         while (canTransparentlyStepInto()) {
+            parentMemberSize = parent->getMembers().size();
+            indices_.push_back(0);
+            parent = &*parent->getMembers().front();
+         }
+         memberIt_ = parent->getMembers().begin();
+      }
+
+      const_member_iterator&
+      operator++() {
+         if (canTransparentlyStepInto()) {
+            Type parent = *memberIt_;
+            while (canTransparentlyStepInto()) {
+               indices_.push_back(0);
+               parent = parent->getMembers().front();
+               parentMemberSize = parent->getMembers().size();
+            }
+         } else if (indices_.back() < parentMemberSize) {
+            ++indices_.back();
+            ++memberIt_;
+         } else {
+            while (indices_.back() == parentMemberSize) {
+               assert(indices_.size() > 2 && "Cannot increment past the end iterator");
+               indices_.pop_back();
+               ++indices_.back();
+               const Base* parent = root;
+               for (unsigned i = 2; i < indices_.size(); ++i) {
+                  parent = &*parent->getMembers()[indices_[i]];
+               }
+               parentMemberSize = parent->getMembers().size();
+            }
+         }
+         return *this;
+      }
+
+      bool operator==(const const_member_iterator& other) const {
+         return (indices_.size() == 2 && other.indices_.size() == 2) || std::tie(root, indices_) == std::tie(other.root, other.indices_);
+      }
+
+      const_member_iterator operator++(int) {
+         const_member_iterator tmp = *this;
+         ++(*this);
+         return tmp;
+      }
+
+      reference operator*() const {
+         return *memberIt_;
+      }
+
+      pointer operator->() const {
+         return &*memberIt_;
+      }
+
+      const std::vector<uint32_t>& GEPDerefValues() const {
+         return indices_;
+      }
+
+      private:
+      bool canTransparentlyStepInto() const {
+         return ((**this)->isStructTy() || (**this)->isUnionTy()) && !(**this)->structOrUnionTy().tag && (**this)->getMembers().size() > 0;
+      }
+
+      const Base* root;
+      std::vector<uint32_t> indices_;
+      // these are denormalizations for performance reasons
+      std::size_t parentMemberSize;
+      std::vector<tagged<Type>>::const_iterator memberIt_;
+   };
+
+   // iterator over members that can be accessed by member access or dereference operator
+   const_member_iterator membersBegin() const {
+      if (kind_ == Kind::STRUCT_T || kind_ == Kind::UNION_T) {
+         return const_member_iterator{*this};
+      }
+      return const_member_iterator{};
+   }
+
+   const_member_iterator membersEnd() const {
+      return const_member_iterator{};
+   }
 
    struct StructOrUnionTy {
       bool operator==(const StructOrUnionTy& other) const = default;
@@ -194,8 +293,9 @@ struct Base {
 
       bool incomplete;
       Ident tag;
-      std::vector<TaggedTY> members;
-      // todo: XXX attributes; // e.g. __attribute__((packed))
+      std::vector<tagged<Type>> members;
+      // todo: XXX attributes; // e.g.warn on gnu style attribute __attribute__((packed))
+      // todo: warn on any attribute
       // todo: XXX members; // might have flexible array member; might have bitfields; might be anonymous union or structures, might have alignas()
    };
 
@@ -204,7 +304,7 @@ struct Base {
       bool operator!=(const EnumTy& other) const = default;
 
       Ident tag;
-      // todo: fixed underlying type needed? ask alexis
+      bool fixedUnerlyingTy;
       Type underlyingType;
    };
 
@@ -348,6 +448,7 @@ bool Base<_EmitterT>::isIntegerTy() const {
       case Kind::INT:
       case Kind::LONG:
       case Kind::LONGLONG:
+      case Kind::ENUM_T:
          return true;
       default:
          return false;
@@ -395,7 +496,7 @@ bool Base<_EmitterT>::isCharacterTy() const {
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
 bool Base<_EmitterT>::isArithmeticTy() const {
-   return isIntegerTy() || isRealFloatingTy(); // todo: this is wrong
+   return isIntegerTy() || isRealFloatingTy();
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
@@ -515,7 +616,7 @@ typename Base<_EmitterT>::Type Base<_EmitterT>::getPointedToTy() const {
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-const std::vector<TaggedType<_EmitterT>>& Base<_EmitterT>::getMembers() const {
+const std::vector<tagged<Type<_EmitterT>>>& Base<_EmitterT>::getMembers() const {
    return structOrUnionTy().members;
 }
 // ---------------------------------------------------------------------------
@@ -552,17 +653,17 @@ void Base<_EmitterT>::populateEmitterType(TypeFactory<_EmitterT>& factory, _Emit
       }
       std::vector<Type> members;
       for (const auto& member : structOrUnionTy().members) {
-         members.push_back(member.ty);
+         members.push_back(member);
       }
       ref_ = emitter.emitStructTy(members, structOrUnionTy().incomplete, structOrUnionTy().tag.prefix("struct."));
    } else if (kind_ == Kind::UNION_T) {
-      Type max = structOrUnionTy().members.front().ty;
+      Type max = structOrUnionTy().members.front();
       for (const auto& member : structOrUnionTy().members) {
-         if (emitter.getIntegerValue(emitter.sizeOf(member.ty)) > emitter.getIntegerValue(emitter.sizeOf(max))) {
-            max = member.ty;
+         if (emitter.getIntegerValue(emitter.sizeOf(member)) > emitter.getIntegerValue(emitter.sizeOf(max))) {
+            max = member;
          }
       }
-      //  std::max_element(structOrUnionTy().members.begin(), structOrUnionTy().members.end(), [&emitter](const TaggedTY& a, const TaggedTY& b) {            return emitter.getIntegerValue(emitter.sizeOf(a.ty)) < emitter.getIntegerValue(emitter.sizeOf(b.ty));})->ty;
+      //  std::max_element(structOrUnionTy().members.begin(), structOrUnionTy().members.end(), [&emitter](const tagged<Type>& a, const tagged<Type>& b) {            return emitter.getIntegerValue(emitter.sizeOf(a.ty)) < emitter.getIntegerValue(emitter.sizeOf(b.ty));})->ty;
       std::vector<Type> members{max};
 
       ref_ = emitter.emitStructTy(members, structOrUnionTy().tag.prefix("union."));
@@ -652,10 +753,10 @@ void Base<_EmitterT>::strImpl(std::stringstream& ss) const {
             if (structOrUnionTy().tag) {
                ss << ' ' << structOrUnionTy().tag;
             }
-            if (!structOrUnionTy().incomplete) {
+            if (!structOrUnionTy().incomplete && !structOrUnionTy().tag) {
                ss << " { ";
                for (const auto& member : structOrUnionTy().members) {
-                  ss << member.ty << ' ' << member.name << "; ";
+                  ss << member << ' ' << member.name() << "; ";
                }
                ss << '}';
             }

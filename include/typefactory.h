@@ -98,8 +98,8 @@ class TypeFactory {
       return Type{construct(base, size, unspecifiedSize)};
    }
 
-   Type enumTy(Type underlyingTy, Ident tag = Ident()) {
-      return Type{construct(underlyingTy, tag)};
+   Type enumTy(Type underlyingTy, bool fixedUnerlyingTy, Ident tag = Ident()) {
+      return Type{construct(underlyingTy, fixedUnerlyingTy, tag)};
    }
 
    // todo: replace with move
@@ -108,7 +108,7 @@ class TypeFactory {
    }
 
    // todo: replace with move
-   Type structOrUnion(token::Kind tk, const std::vector<TaggedType<_EmitterT>>& members, bool incomplete, Ident tag = Ident()) {
+   Type structOrUnion(token::Kind tk, const std::vector<tagged<Type>>& members, bool incomplete, Ident tag = Ident()) {
       return Type{construct(tk, members, incomplete, tag)};
    }
 

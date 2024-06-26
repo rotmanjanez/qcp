@@ -8,9 +8,12 @@
 %compare-strncmp
 %struct-type
 %{
+#ifndef QCP_TOKEN_RESERVED_KEYWORD_HASH_H
+#define QCP_TOKEN_RESERVED_KEYWORD_HASH_H
 // ---------------------------------------------------------------------------
 // qcp
 // ---------------------------------------------------------------------------
+#include "keywords.h"
 #include "token.h"
 // ---------------------------------------------------------------------------
 #include <cstring>
@@ -87,3 +90,4 @@ struct GPerfToken;
 } // end namespace token
 } // end namespace qcp
 // ---------------------------------------------------------------------------
+#endif // QCP_TOKEN_RESERVED_KEYWORD_HASH_H

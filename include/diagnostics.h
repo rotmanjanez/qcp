@@ -5,6 +5,7 @@
 // ---------------------------------------------------------------------------
 // Alexis hates iostream
 #include <iostream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -34,6 +35,8 @@ class DiagnosticMessage {
 
    std::size_t line() const;
    std::size_t column() const;
+   std::string_view file() const;
+   std::size_t translationUnitLine() const;
 
    Kind kind() const {
       return kind_;
@@ -41,6 +44,7 @@ class DiagnosticMessage {
 
    private:
    std::vector<long long>::const_iterator findLineBegin() const;
+   std::map<std::size_t, std::pair<std::string, std::size_t>>::const_iterator findFileBegin() const;
 
    const DiagnosticTracker& tracker_;
    Kind kind_;
@@ -56,7 +60,9 @@ class DiagnosticTracker {
    friend class DiagnosticMessage;
 
    public:
-   DiagnosticTracker(std::string filename, std::string_view prog) : filename{std::move(filename)}, prog_{prog} {}
+   DiagnosticTracker(std::string filename, std::string_view prog) : filename{std::move(filename)}, prog_{prog} {
+      fileStack_[0] = std::make_pair(this->filename, 0);
+   }
 
    template <typename T>
    DiagnosticTracker& operator<<(const T& value);
@@ -74,12 +80,17 @@ class DiagnosticTracker {
       silenced = false;
    }
 
+   void registerFileMapping(std::string filename, std::size_t srcOffset) {
+      fileStack_[lineBreaks_.size() - 1] = std::make_pair(std::move(filename), srcOffset);
+   }
+
    private:
    DiagnosticMessage::Kind kind_{DiagnosticMessage::Kind::ERROR};
    std::stringstream os_{};
    std::optional<SrcLoc> loc_{};
    std::vector<DiagnosticMessage> diagnostics_{};
    std::vector<long long> lineBreaks_{-1}; // first linebreak is right before the first character
+   std::map<std::size_t, std::pair<std::string, std::size_t>> fileStack_{};
    bool silenced = false;
    std::string filename;
    std::string_view prog_;

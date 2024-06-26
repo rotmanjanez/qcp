@@ -38,9 +38,6 @@ template <typename _EmitterT>
 class TypeFactory;
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-struct TaggedType;
-// ---------------------------------------------------------------------------
-template <typename _EmitterT>
 class Type {
    using Base = Base<_EmitterT>;
    using TypeFactory = TypeFactory<_EmitterT>;
@@ -51,11 +48,10 @@ class Type {
    friend std::ostream& operator<<(std::ostream& os, const Type<T>& ty);
 
    friend TypeFactory;
-
-   friend typename TypeFactory::DeclTypeBaseRef;
+   // sfriend typename TypeFactory::DeclTypeBaseRef;
+   // friend typename Base::const_member_iterator;
 
    explicit Type(std::pair<unsigned short, std::vector<Base>&> ini) : index_{ini.first}, types_{&ini.second} {}
-
    Type(std::vector<Base>& types, unsigned short index) : index_{index}, types_{&types} {}
 
    public:
@@ -64,9 +60,16 @@ class Type {
       bool operator==(const Qualifiers& other) const = default;
       bool operator!=(const Qualifiers& other) const = default;
 
-      bool CONST = false;
-      bool RESTRICT = false;
-      bool VOLATILE = false;
+      bool operator<(const Qualifiers& other) const {
+         return std::tie(CONST, RESTRICT, VOLATILE) < std::tie(other.CONST, other.RESTRICT, other.VOLATILE);
+      }
+      bool operator>(const Qualifiers& other) const {
+         return std::tie(CONST, RESTRICT, VOLATILE) > std::tie(other.CONST, other.RESTRICT, other.VOLATILE);
+      }
+
+      char CONST : 1 = false,
+                   RESTRICT : 1 = false,
+                   VOLATILE : 1 = false;
       // todo: bool ATOMIC = false;
    };
 
@@ -122,8 +125,9 @@ class Type {
       return *this;
    }
 
-   bool operator==(const Type& other) const = default;
-   bool operator!=(const Type& other) const = default;
+   bool operator==(const Type& other) const {
+      return *this && other && **this == *other;
+   }
 
    // todo: change to partial ordering
    std::strong_ordering operator<=>(const Type& other) const {
@@ -154,59 +158,6 @@ class Type {
    unsigned short index_;
    std::vector<Base>* types_;
 };
-// ---------------------------------------------------------------------------
-template <typename _EmitterT>
-struct TaggedType {
-   using Type = Type<_EmitterT>;
-   using Base = Base<_EmitterT>;
-   using ty_t = typename _EmitterT::ty_t;
-
-   TaggedType(const TaggedType& other) = default;
-   TaggedType(TaggedType&& other) = default;
-   TaggedType& operator=(const TaggedType& other) = default;
-   TaggedType& operator=(TaggedType&& other) = default;
-
-   TaggedType(Ident name, Type ty) : name{name}, ty{ty} {}
-
-   bool operator==(const TaggedType& other) const {
-      return ty == other.ty && name == other.name;
-   }
-
-   auto operator<=>(const TaggedType& other) const {
-      return ty <=> other.ty == 0 ? name <=> other.name : ty <=> other.ty;
-   }
-
-   operator bool() const {
-      return ty;
-   }
-
-   const Base* operator->() const {
-      return &**this;
-   }
-
-   const Base& operator*() const {
-      return *ty;
-   }
-
-   operator ty_t*() const {
-      return static_cast<ty_t*>(ty);
-   }
-
-   template <typename T>
-   friend std::ostream& operator<<(std::ostream& os, const TaggedType<T>& ty);
-
-   Ident name{};
-   Type ty{};
-};
-// ---------------------------------------------------------------------------
-template <typename _EmitterT>
-std::ostream& operator<<(std::ostream& os, const TaggedType<_EmitterT>& ty) {
-   if (ty.name) {
-      os << ty.name << ": ";
-   }
-   os << ty.ty;
-   return os;
-}
 // ---------------------------------------------------------------------------
 // Type
 // ---------------------------------------------------------------------------

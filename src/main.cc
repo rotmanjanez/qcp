@@ -8,21 +8,6 @@
 #include "parser.h"
 #include "tokenizer.h"
 // ---------------------------------------------------------------------------
-// BRAIN DUMP
-// ---------------------------------------------------------------------------
-// keyword                      | all keywords are also identifiers
-// identifier                   | all identifiers start with a letter or an underscore
-// constant
-// - integer-constant       | all integer constants start with a digit
-// - floating-constant      | all floating constants start with a digit or a period
-// - enumeration-constant   | all enumeration constants are identifiers
-// - character-constant     | all character constants start with a single quote or with u8, u, U, or L followed by a single quote
-// - predefined-constant    | all predefined constants are keywords
-// string-literal               | all string literals start with a double quote or with u8, u, U, or L followed by a double quote
-// punctuator                   | all punctuators start with one of [](){}.-+&*~!/%<>=^|?:;#,
-
-// identifiert_start, punctuator_start, ' or "
-// ---------------------------------------------------------------------------
 using Parser = qcp::Parser<qcp::emitter::LLVMEmitter>;
 // ---------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
@@ -31,6 +16,14 @@ int main(int argc, char* argv[]) {
 
    // print code
    std::cout << code << std::endl;
+
+   {
+      qcp::DiagnosticTracker diag{argv[1], code};
+      qcp::Tokenizer tokenizer{code, diag};
+      for (const auto& token : tokenizer) {
+         std::cout << token << std::endl;
+      }
+   }
 
    // Call your parser
    qcp::DiagnosticTracker diag{argv[1], code};

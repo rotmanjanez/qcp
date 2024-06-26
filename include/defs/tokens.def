@@ -1,5 +1,6 @@
 #include "defines.def"
-
+ENUM_ENTRY(PP_START)
+ENUM_ENTRY(PP_END)
 // tokens in operator precedence order (as complete as possible) starting from the arethmetic operators (precedence 3)
 NAMED_ENUM_ENTRY(ASTERISK, "*")
 NAMED_ENUM_ENTRY(DIV, "/")

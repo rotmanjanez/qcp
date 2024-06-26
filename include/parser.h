@@ -18,6 +18,7 @@
 #include "typefactory.h"
 // ---------------------------------------------------------------------------
 #include <memory>
+#include <span>
 #include <string_view>
 #include <utility>
 #include <variant>
@@ -33,7 +34,6 @@ class Parser {
 
    using TYK = type::Kind;
    using Type = type::Type<_EmitterT>;
-   using TaggedTY = type::TaggedType<_EmitterT>;
    using Factory = type::TypeFactory<_EmitterT>;
    using DeclTypeBaseRef = typename Factory::DeclTypeBaseRef;
 
@@ -142,7 +142,7 @@ class Parser {
 
    private:
    int parseOptLabelList(std::vector<attr_t>& attr);
-   void parseOptMemberDeclaratorList(Type specifierQualifier, std::vector<TaggedTY>& members, std::vector<SrcLoc>& locs);
+   void parseOptMemberDeclaratorList(Type specifierQualifier, std::vector<tagged<Type>>& members, std::vector<SrcLoc>& locs);
    std::vector<attr_t> parseOptAttributeSpecifierSequence();
 
    Type parseAbstractDeclarator(Type specifierQualifier);
@@ -232,7 +232,37 @@ class Parser {
    value_t emitNot(Type ty, value_t value);
    value_t emitCast(Type fromTy, value_t value, Type toTy, qcp::type::Cast cast);
 
-   void emitAssignment() {
+   void emitAssignment(SrcLoc opLoc, Type lTy, ssa_t* lValue, expr_t& rhs) {
+      Type rTy = rhs->ty;
+      if (!lTy || !rTy) {
+         diagnostics_ << opLoc << "invalid operands to binary expression ('" << lTy << "' and '" << rTy << "')" << std::endl;
+      } else if (lTy->isArithmeticTy() && rTy->isArithmeticTy()) {
+         emitter_.emitStore(state.bb, lTy, cast(rhs, lTy), lValue);
+      } else if (lTy->isPointerTy() && rTy->isPointerTy()) {
+         // compares base types and therefore does not check for qualifiers
+         Type lPointee = lTy->getPointedToTy();
+         Type rPointee = rTy->getPointedToTy();
+         // todo: check for nullptr_t and null pointer constant
+         if (!lPointee->isCompatibleWith(*rPointee) && !(rPointee->isVoidTy() || lPointee->isVoidTy())) {
+            diagnostics_ << opLoc << "incompatible pointer types assigning to '" << lTy << "' from '" << rTy << '\'' << std::endl;
+         } else if (lPointee.qualifiers < rPointee.qualifiers) {
+            diagnostics_ << opLoc << "discards qualifiers from pointer target type ('" << rTy << "' to '" << lTy << "')" << std::endl;
+         } else {
+            emitter_.emitStore(state.bb, lTy, asRVal(rhs), lValue);
+         }
+      } else if (lTy->isBoolTy() && rTy->isPointerTy()) {
+         emitter_.emitStore(state.bb, lTy, asRVal(rhs), lValue);
+      } else {
+         diagnostics_ << opLoc << "invalid operands to binary expression ('" << lTy << "' and '" << rTy << "')" << std::endl;
+      }
+   }
+
+   void emitAssignment(SrcLoc opLoc, expr_t& lhs, expr_t& rhs) {
+      if (ssa_t** lValue = std::get_if<ssa_t*>(&lhs->value)) {
+         emitAssignment(opLoc, lhs->ty, lValue, rhs);
+      } else {
+         diagnostics_ << opLoc << "lvalue required as left operand of assignment" << std::endl;
+      }
    }
 
    const_or_iconst_t parseBracedInitializer(Type ty) {
@@ -279,7 +309,8 @@ class Parser {
       } else {
          ptr = std::get<ssa_t*>(value);
       }
-      return emitter_.emitGEP(state.bb, expr->ty, ptr, std::array<uint64_t, 2>{0, 0});
+      std::array<uint32_t, 2> indices{0, 0};
+      return emitter_.emitGEP(state.bb, expr->ty, ptr, indices);
    }
 
    void optArrToPtrDecay(expr_t& expr) {
@@ -305,7 +336,7 @@ class Parser {
    void noteConstDeclHere(SrcLoc loc, Ident ident);
    void errorRedef(SrcLoc loc, Ident ident, Type aTy = Type(), Type bTy = Type()) {
       diagnostics_ << loc.truncate(0) << "redefinition of '" << ident << '\'';
-      if (aTy != bTy) {
+      if (aTy && bTy && aTy != bTy) {
          diagnostics_ << " with different types ('" << aTy << "' vs '" << bTy << "')";
       }
       diagnostics_ << std::endl;
@@ -425,14 +456,15 @@ class Parser {
          if constexpr (returnCompoundLiteral) {
             std::vector<const_or_iconst_t> values{};
             for (auto& member : ty->getMembers()) {
-               values.push_back(defaultInitializeImpl<true>(member.ty, nullptr));
+               values.push_back(defaultInitializeImpl<true>(member, nullptr));
             }
             return emitter_.emitStructConst(ty, values);
          } else {
-            auto begin = ty->getMembers().begin();
-            for (auto it = begin; it != ty->getMember().end(); ++it) {
-               ssa_t* ptr = emitter_.emitGEP(state.bb, it->ty, var, std::array<uint64_t, 2>{0, std::distance(begin, it)});
-               defaultInitializeImpl<false>(it->ty, ptr);
+            for (unsigned int i = 0; i < ty->getMembers().size(); ++i) {
+               Type memberTy = ty->getMembers()[i].ty;
+               std::array<uint64_t, 2> indices{0, i};
+               ssa_t* ptr = emitter_.emitGEP(state.bb, memberTy, var, indices);
+               defaultInitializeImpl<false>(memberTy, ptr);
             }
          }
       } else if (ty->isUnionTy()) {
@@ -440,9 +472,9 @@ class Parser {
             if (ty->getMembers().empty()) {
                return {};
             }
-            return defaultInitializeImpl<true>(ty->getMembers().front().ty, nullptr);
+            return defaultInitializeImpl<true>(ty->getMembers().front(), nullptr);
          } else {
-            defaultInitializeImpl<false>(ty->getMembers().front().ty, var);
+            defaultInitializeImpl<false>(ty->getMembers().front(), var);
          }
       } else {
          not_implemented();
@@ -551,7 +583,7 @@ bool isLabelStmtStart(token::Kind first, token::Kind second) {
 }
 // ---------------------------------------------------------------------------
 bool isPostfixExprStart(token::Kind kind) {
-   return kind == TK::INC || kind == TK::DEC || kind == TK::L_BRACKET || kind == TK::L_BRACE || kind == TK::DEREF || kind == TK::PERIOD;
+   return kind == token::Kind::INC || kind == token::Kind::DEC || kind == token::Kind::L_BRACKET || kind == token::Kind::L_BRACE || kind == token::Kind::DEREF || kind == token::Kind::PERIOD;
 }
 // ---------------------------------------------------------------------------
 #endif // __IDE_MARKER
@@ -746,7 +778,6 @@ typename Parser<_EmitterT>::value_t Parser<_EmitterT>::cast(SrcLoc loc, Type fro
       } else if (from->rank() < to->rank()) {
          kind = (from->isSignedTy() || from->isSignedCharlikeTy()) ? type::Cast::SEXT : type::Cast::ZEXT;
       } else {
-         // different signess does not require a cast in llvm? todo: ask alexis
          return value;
       }
    } else if (from->isIntegerTy() && to->isFloatingTy()) {
@@ -758,7 +789,7 @@ typename Parser<_EmitterT>::value_t Parser<_EmitterT>::cast(SrcLoc loc, Type fro
    } else if (from->isFloatingTy() && to->isFloatingTy() && from->rank() < to->rank()) {
       kind = type::Cast::FPEXT;
    } else if ((from->isPointerTy() && to->isIntegerTy()) ||
-              (from->isIntegerTy() && to->isPointerTy())) { // todo: ask alexis if there is a problem with this
+              (from->isIntegerTy() && to->isPointerTy())) {
       if (!from->isPointerTy()) {
          kind = type::Cast::INTTOPTR;
 
@@ -767,7 +798,7 @@ typename Parser<_EmitterT>::value_t Parser<_EmitterT>::cast(SrcLoc loc, Type fro
          kind = type::Cast::PTRTOINT;
       }
       if (!explicitCast) {
-         // todo: diagnostics_ << loc << "incompatible integer to pointer conversion from '" << from << "' to '" << to << '\'' << std::endl;
+         diagnostics_ << loc << "incompatible integer to pointer conversion from '" << from << "' to '" << to << '\'' << std::endl;
       }
    } else if ((from->isPointerTy() || from->isArrayTy()) && to->isPointerTy()) {
       // todo: check if the pointer types are compatible
@@ -867,6 +898,26 @@ void Parser<_EmitterT>::parse() {
    while (*pos_) {
       diagnostics_.unsilence();
       loc = pos_->getLoc();
+      if (consumeAnyOf(TK::PP_START)) {
+         tracer_ << ENTER{"parsePreprocessorDirective"};
+         Token lineNo = consumeAnyOf(TK::ICONST, TK::L_ICONST, TK::LL_ICONST);
+         Token file = consumeAnyOf(TK::SLITERAL);
+         std::vector<int> cmds{};
+         while (pos_->getKind() != TK::END && pos_->getKind() != TK::PP_END) {
+            if (Token t = consumeAnyOf(TK::ICONST)) {
+               cmds.push_back(t.getValue<int>());
+            } else {
+               ++pos_;
+            }
+         }
+         consumeAnyOf(TK::PP_END);
+         if (lineNo && file) {
+            std::string fileName{file.getString()};
+            diagnostics_.registerFileMapping(fileName, lineNo.getValue<int>());
+         }
+         tracer_ << EXIT{"parsePreprocessorDirective"};
+         continue;
+      }
       std::vector<attr_t> attr = parseOptAttributeSpecifierSequence();
       state = State();
       parseDeclStmt(attr);
@@ -1142,7 +1193,7 @@ void Parser<_EmitterT>::parseDeclStmt(const std::vector<attr_t>& attr) {
                info->ty = decl.ty;
             }
 
-            if (consumeAnyOf(TK::ASSIGN)) {
+            if (Token assignToken = consumeAnyOf(TK::ASSIGN)) {
                if (!decl.ty->isCompleteTy()) {
                   errorVarIncompleteType(decl.nameLoc, decl.ty);
                   decl.ty = factory_.undefTy();
@@ -1194,10 +1245,8 @@ void Parser<_EmitterT>::parseDeclStmt(const std::vector<attr_t>& attr) {
                      externDeclarations_.erase(it);
                   }
 
-               } else if (!initExpr->ty->isCompatibleWith(*decl.ty)) {
-                  diagnostics_ << initExpr->loc << "incompatible types when initializing '" << decl.ident << "': '" << decl.ty << "' vs '" << initExpr->ty << '\'' << std::endl;
                } else {
-                  emitter_.emitStore(state.bb, decl.ty, cast(initExpr, decl.ty), var);
+                  emitAssignment(assignToken.getLoc(), decl.ty, var, initExpr);
                }
             } else if (isGlobal && decl.ident) {
                if (declSpec.storageClass[0] == TK::EXTERN) {
@@ -1727,8 +1776,12 @@ Parser<_EmitterT>::expr_t Parser<_EmitterT>::parsePostfixExpr(expr_t&& lhs) {
       }
       value_t result;
       if (ty->kind() == TYK::STRUCT_T || ty->kind() == TYK::UNION_T) {
-         auto it = std::find_if(ty->getMembers().begin(), ty->getMembers().end(), [&member](const auto& m) { return m.name == member; });
-         if (it == ty->getMembers().end()) {
+         // auto it = std::find_if(ty->membersBegin(), ty->membersEnd(), [&member](const auto& m) { return m.name() == member; });
+         auto it = ty->membersBegin();
+         while (it != ty->membersEnd() && it->name() != member) {
+            ++it;
+         }
+         if (it == ty->membersEnd()) {
             diagnostics_ << pos_.getPrevLoc() << "no member named '" << member << "' in '" << ty << '\'' << std::endl;
             result = emitter_.emitPoison();
             ty = factory_.undefTy();
@@ -1736,18 +1789,16 @@ Parser<_EmitterT>::expr_t Parser<_EmitterT>::parsePostfixExpr(expr_t&& lhs) {
             diagnostics_ << pos_.getPrevLoc() << "member access in constant expression" << std::endl;
          } else {
             if (ty->kind() == TYK::STRUCT_T) {
-               auto elem = static_cast<unsigned int>(std::distance(ty->getMembers().begin(), it));
-               if (kind == TK::DEREF) {
-                  std::array<uint32_t, 3> indices{0, 0, elem};
-                  result = emitter_.emitGEP(state.bb, ty, ptr, indices);
-               } else {
-                  std::array<uint32_t, 2> indices{0, elem};
-                  result = emitter_.emitGEP(state.bb, ty, ptr, indices);
+               std::span<const uint32_t> indices{it.GEPDerefValues().begin(), it.GEPDerefValues().size()};
+               if (kind == TK::PERIOD) {
+                  // remove first zero index if dereferencing is not needed
+                  indices = indices.subspan(1);
                }
+               result = emitter_.emitGEP(state.bb, ty, ptr, indices);
             } else {
                result = ptr;
             }
-            ty = it->ty;
+            ty = *it;
          }
 
       } else {
@@ -2210,12 +2261,12 @@ typename Parser<_EmitterT>::Declarator Parser<_EmitterT>::parseDeclaratorImpl() 
 }
 // ---------------------------------------------------------------------------
 template <typename _EmitterT>
-void Parser<_EmitterT>::parseOptMemberDeclaratorList(Type specifierQualifier, std::vector<TaggedTY>& members, std::vector<SrcLoc>& locs) {
+void Parser<_EmitterT>::parseOptMemberDeclaratorList(Type specifierQualifier, std::vector<tagged<Type>>& members, std::vector<SrcLoc>& locs) {
    parseOptAttributeSpecifierSequence();
    if (isDeclaratorStart(pos_->getKind())) {
       do {
          Declarator decl = parseMemberDeclarator(specifierQualifier);
-         auto it = std::find_if(members.begin(), members.end(), [&decl](const auto& m) { return m.name == decl.ident; });
+         auto it = std::find_if(members.begin(), members.end(), [&decl](const auto& m) { return m.name() == decl.ident; });
          if (it != members.end()) {
             diagnostics_ << decl.nameLoc << "duplicate member '" << decl.ident << "'" << std::endl;
             notePrevWhatHere("declaration", locs[std::distance(members.begin(), it)]);
@@ -2279,7 +2330,7 @@ typename Parser<_EmitterT>::DeclarationSpecifier Parser<_EmitterT>::parseDeclara
             completesTy = static_cast<Type*>(typeScope_.find(tag));
             tagLoc = t.getLoc();
          }
-         std::vector<TaggedTY> members;
+         std::vector<tagged<Type>> members;
          std::vector<SrcLoc> locs{};
          if (consumeAnyOf(TK::L_C_BRKT)) {
             // struct-declaration-list
@@ -2381,7 +2432,7 @@ typename Parser<_EmitterT>::DeclarationSpecifier Parser<_EmitterT>::parseDeclara
          } else {
             // todo: assert that attribute-specifier-sequence is empty
          }
-         ty = factory_.enumTy(maxTy, tag);
+         ty = factory_.enumTy(maxTy, !!underlyingTy, tag);
       } else if (Token t = consumeAnyOf(TK::TYPEOF, TK::TYPEOF_UNQUAL)) {
          expect(TK::L_BRACE);
          if (isTypeSpecifierQualifier(pos_->getKind())) {
@@ -2528,25 +2579,54 @@ template <typename _EmitterT>
 std::vector<typename Parser<_EmitterT>::attr_t> Parser<_EmitterT>::parseOptAttributeSpecifierSequence() {
    // todo: (jr) not implemented
    std::vector<Token> attrs{};
-   while (pos_->getKind() == TK::L_BRACKET && pos_.peek() == TK::L_BRACKET) {
+   static Ident GNU_ATTRIBUTE_IDENTIFIER{"__attribute__"};
+   bool isGNUAttribute = false;
+   if (pos_->getKind() == TK::IDENT && pos_->getValue<Ident>() == GNU_ATTRIBUTE_IDENTIFIER) {
+      isGNUAttribute = true;
+   }
+   while ((pos_->getKind() == TK::L_BRACKET && pos_.peek() == TK::L_BRACKET) || isGNUAttribute) {
       ++pos_;
-      ++pos_;
+      if (isGNUAttribute) {
+         ++pos_;
+      }
       unsigned attrCount = 0;
       // attribute-list
-      while (!consumeAnyOf(TK::R_BRACKET)) {
+      while ((isGNUAttribute && pos_->getKind() != TK::R_BRACE) || (!isGNUAttribute && pos_->getKind() != TK::R_BRACKET)) {
          // attribute
          if (attrCount) {
             expect(TK::COMMA);
          }
 
          Token t = expect(TK::IDENT);
+         Ident attr = t.getValue<Ident>();
+         if (consumeAnyOf(TK::D_COLON)) {
+            t = expect(TK::IDENT);
+            attr += "::";
+            attr += t.getValue<Ident>();
+         }
          attrs.push_back(t);
          ++attrCount;
-
-         // todo: attribute-prefixed-token
-         // todo: attribute-argument-clause(opt)
+         if (consumeAnyOf(TK::L_BRACE)) {
+            // attribute-argument-clause
+            std::vector<TK> braces;
+            do {
+               if (Token t = consumeAnyOf(TK::L_BRACE, TK::L_BRACKET, TK::L_C_BRKT)) {
+                  braces.push_back(t.getKind());
+               } else if (Token t = consumeAnyOf(TK::R_BRACE, TK::R_BRACKET, TK::R_C_BRKT)) {
+                  if (braces.empty() || braces.back() != t.getKind()) {
+                     diagnostics_ << t.getLoc() << "unmatched closing brace" << std::endl;
+                  } else {
+                     braces.pop_back();
+                  }
+               } else {
+                  ++pos_;
+               }
+            } while (!braces.empty());
+            expect(TK::L_BRACE);
+         }
       }
-      expect(TK::R_BRACKET);
+      ++pos_;
+      isGNUAttribute || expect(TK::R_BRACE);
    }
    return attrs;
 }

@@ -21,22 +21,32 @@ std::ostream& operator<<(std::ostream& os, const Kind& tt) {
 std::ostream& operator<<(std::ostream& os, const Token& token) {
    switch (token.type) {
       case Kind::FCONST:
+         os << token.getValue<float>();
+         break;
       case Kind::DCONST:
-      case Kind::LDCONST:
+         os << token.getValue<double>();
+         break;
       case Kind::ICONST:
+         os << token.getValue<int>();
+         break;
+      case Kind::LDCONST:
       case Kind::U_ICONST:
       case Kind::L_ICONST:
       case Kind::UL_ICONST:
       case Kind::LL_ICONST:
+         assert(false);
       case Kind::ULL_ICONST:
+         os << token.getValue<unsigned long long>();
+         break;
       case Kind::IDENT:
-         os << token.getKind() << "(TODO: not implemented)"; // << token.value << ")";
+         os << token.getValue<Ident>();
          break;
       case Kind::SLITERAL:
-      case Kind::CLITERAL:
-         os << token.getKind() << "(TODO: not implemented)"; // << token.value << ")";
+         os << std::quoted(token.getString());
          break;
-      // Handle other Kind values here
+      case Kind::CLITERAL:
+         os << std::quoted(token.getString(), '\'');
+         break;
       default:
          os << token.getKind();
          break;

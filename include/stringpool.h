@@ -36,9 +36,16 @@ class Ident {
 
    // stringlike template
    template <typename T>
-   Ident operator+(T rhs) const {
-      return Ident{std::string(*this) + std::string(rhs)};
-   }
+   Ident operator+(T rhs) const;
+
+   template <typename T>
+   Ident operator+(T* rhs) const;
+
+   template <typename T>
+   Ident& operator+=(T rhs);
+
+   template <typename T>
+   Ident& operator+=(T* rhs);
 
    Ident prefix(const char* str) const {
       return Ident{std::string(str) + std::string(*this)};
@@ -51,7 +58,65 @@ class Ident {
    unsigned tag;
 };
 // ---------------------------------------------------------------------------
+template <typename T>
+Ident Ident::operator+(T rhs) const {
+   return Ident{std::string(*this) + std::string(rhs)};
+}
+// ---------------------------------------------------------------------------
+template <typename T>
+Ident Ident::operator+(T* rhs) const {
+   return Ident{std::string(*this) + std::string(rhs)};
+}
+// ---------------------------------------------------------------------------
+template <typename T>
+Ident& Ident::operator+=(T rhs) {
+   *this = *this + rhs;
+   return *this;
+}
+// ---------------------------------------------------------------------------
+template <typename T>
+Ident& Ident::operator+=(T* rhs) {
+   *this = *this + rhs;
+   return *this;
+}
+// ---------------------------------------------------------------------------
 std::ostream& operator<<(std::ostream& os, const Ident& ident);
+// ---------------------------------------------------------------------------
+template <typename T>
+class tagged : public T {
+   using T::T;
+
+   template <typename U>
+   friend std::ostream& operator<<(std::ostream& os, const tagged<U>& t);
+
+   public:
+   template <typename... Args>
+   tagged(Ident name, Args&&... args) : T{std::forward<Args>(args)...}, name_{name} {}
+
+   operator T&() const {
+      return static_cast<const T&>(*this);
+   }
+
+   operator T&() {
+      return static_cast<T&>(*this);
+   }
+
+   bool operator==(const tagged& other) const {
+      return name_ == other.name_ && static_cast<const T&>(*this) == static_cast<const T&>(other);
+   }
+
+   Ident name() const {
+      return name_;
+   }
+
+   private:
+   Ident name_{};
+};
+// ---------------------------------------------------------------------------
+template <typename T>
+std::ostream& operator<<(std::ostream& os, const tagged<T>& t) {
+   return os << t.name() << ": " << static_cast<const T&>(t);
+}
 // ---------------------------------------------------------------------------
 } // namespace qcp
 // ---------------------------------------------------------------------------
