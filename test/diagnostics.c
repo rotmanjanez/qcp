@@ -414,91 +414,91 @@ union Data {
 };
 /* ------- SEPERATOR ------- */
 int foo(int val) {
-      {
-         int block_var = 10;
-      }
-      return block_var + val;
+   {
+      int block_var = 10;
    }
+   return block_var + val;
+}
 /* ------- SEPERATOR ------- */
 enum Colors { RED,
-                 GREEN,
-                 RED };
-   int foo() {
-      return 0;
-   }
+              GREEN,
+              RED };
+int foo() {
+   return 0;
+}
 /* ------- SEPERATOR ------- */
 int foo(int x, int y) {
-      return x + y;
-   }
-   int bar() {
-      int z = foo(1);
-      return 0;
-   }
+   return x + y;
+}
+int bar() {
+   int z = foo(1);
+   return 0;
+}
 /* ------- SEPERATOR ------- */
 int invalid_test(void) {
-      int a = invalid_int;
-      int b = invalid_function();
-      return a + b;
-   }
+   int a = invalid_int;
+   int b = invalid_function();
+   return a + b;
+}
 /* ------- SEPERATOR ------- */
 struct Point {
-      int x;
-   };
-   int foo() {
-      struct Point p = {.x = 10, .y = 20};
-      return 0;
-   }
+   int x;
+};
+int foo() {
+   struct Point p = {.x = 10, .y = 20};
+   return 0;
+}
 /* ------- SEPERATOR ------- */
 enum Colors { RED,
-                 GREEN,
-                 BLUE };
-   int foo() {
-      Colors color = RED;
-      return 0;
-   }
+              GREEN,
+              BLUE };
+int foo() {
+   Colors color = RED;
+   return 0;
+}
 /* ------- SEPERATOR ------- */
 int test(void) {
-      double x = 42.0;
-      _Generic(x,
-          int: "int",
-          float: "float");
-           return 0;
-   }
+   double x = 42.0;
+   _Generic(x,
+       int: "int",
+       float: "float");
+   return 0;
+}
 /* ------- SEPERATOR ------- */
 int test(void) {
-      int x = 42;
-      _Generic(x,
-          default: "default1",
-          default: "default2");
-      return 0;
-   }
+   int x = 42;
+   _Generic(x,
+       default: "default1",
+       default: "default2");
+   return 0;
+}
 /* ------- SEPERATOR ------- */
 enum Colors { RED,
-                 GREEN,
-                 BLUE };
-   int foo() {
-      enum Colors color = YELLOW;
-      return 0;
-   }
+              GREEN,
+              BLUE };
+int foo() {
+   enum Colors color = YELLOW;
+   return 0;
+}
 /* ------- SEPERATOR ------- */
 int test(void) {
-      int x = 42;
-      _Generic(x,
-          int: "int",
-          nonexisting_type: "nonexisting");
-      return 0;
-   }
+   int x = 42;
+   _Generic(x,
+       int: "int",
+       nonexisting_type: "nonexisting");
+   return 0;
+}
 /* ------- SEPERATOR ------- */
 int foo() {
-      int x = 1;
-      int y = 2;
-      switch (x) {
-         case y:
-            x = 3;
-            break;
-      }
-      return 0;
+   int x = 1;
+   int y = 2;
+   switch (x) {
+      case y:
+         x = 3;
+         break;
    }
+   return 0;
+}
 /* ------- SEPERATOR ------- */
 int foo() {
    int x = 10;
@@ -556,10 +556,10 @@ int test(void) {
       _Generic(x,
           int: "int",
           signed int: "signed int");
-      return 0;
+           return 0;
    }
-/* ------- SEPERATOR ------- */
-int foo() {
+   /* ------- SEPERATOR ------- */
+   int foo() {
       int x = 10;
       switch (x) {
          case 1:
@@ -569,8 +569,8 @@ int foo() {
       }
       return 0;
    }
-/* ------- SEPERATOR ------- */
-int foo() {
+   /* ------- SEPERATOR ------- */
+   int foo() {
       int x = 1;
       switch (x) {
          case 1:
@@ -582,8 +582,8 @@ int foo() {
       }
       return 0;
    }
-/* ------- SEPERATOR ------- */
-struct A {
+   /* ------- SEPERATOR ------- */
+   struct A {
       struct {
          int x;
          struct {
@@ -593,8 +593,13 @@ struct A {
    } globalA;
 
    int y = globalA.y;
-/* ------- SEPERATOR ------- */
-struct incomplete_type;
+   /* ------- SEPERATOR ------- */
+   int foo() {
+      int x = "Hello";
+      return 0;
+   }
+   /* ------- SEPERATOR ------- */
+   struct incomplete_type;
 
    int test(void) {
       int x = 42;
@@ -603,8 +608,8 @@ struct incomplete_type;
           struct incomplete_type: "incomplete");
       return 0;
    }
-/* ------- SEPERATOR ------- */
-struct Point {
+   /* ------- SEPERATOR ------- */
+   struct Point {
       int x;
       int y;
    };

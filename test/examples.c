@@ -11,6 +11,16 @@ int i[];
 int i[3];
 int i[];
 /* ------- SEPERATOR ------- */
+bool b = false;
+/* ------- SEPERATOR ------- */
+bool b = true;
+/* ------- SEPERATOR ------- */
+_Bool b = 0;
+/* ------- SEPERATOR ------- */
+_Bool b = 1;
+/* ------- SEPERATOR ------- */
+_Bool b = 2;
+/* ------- SEPERATOR ------- */
 int foo(int a) {
    return -a;
 }
@@ -82,11 +92,6 @@ int foo_dereference(int* a) {
 /* ------- SEPERATOR ------- */
 int foo() {
    void* ptr = 10;
-   return 0;
-}
-/* ------- SEPERATOR ------- */
-int foo() {
-   int x = "Hello";
    return 0;
 }
 /* ------- SEPERATOR ------- */
