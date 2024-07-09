@@ -38,7 +38,7 @@ class Tokenizer {
       explicit const_iterator() : token_{TK::END}, prog_{}, progBegin_{prog_.begin()}, pp{0}, diagnostics_{nullptr} {}
       explicit const_iterator(const std::string_view prog_, DiagnosticTracker& diagnistics) : token_{TK::UNKNOWN}, prog_{prog_}, progBegin_{prog_.begin()}, pp{!prog_.empty() && prog_.front() == '#' ? 1 : 0}, diagnostics_{&diagnistics} {
          if (pp) {
-            token_ = Token{SrcLoc{0, 1u}, Ident{prog_.substr(1)}, TK::PP_START};
+            token_ = Token{SrcLoc{0, 1u}, TK::PP_START};
             this->prog_ = prog_.substr(1);
          } else {
             ++(*this);
@@ -74,6 +74,10 @@ class Tokenizer {
          return prevLoc_;
       }
 
+      operator bool() const {
+         return token_.getKind() != TK::END;
+      }
+
       private:
       sv_it getNumberConst(sv_it begin);
       sv_it getPunctuator(sv_it begin);
@@ -102,9 +106,7 @@ class Tokenizer {
 // ---------------------------------------------------------------------------
 template <typename T, typename U>
 T safe_cast(U value) {
-   if (value > std::numeric_limits<T>::max()) {
-      throw std::overflow_error("value to large for safe cast");
-   }
+   assert(value <= std::numeric_limits<T>::max() && "value to large for safe cast");
    return static_cast<T>(value);
 }
 // ---------------------------------------------------------------------------

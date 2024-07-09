@@ -4,10 +4,10 @@
 #include "tokenizer.h"
 // ---------------------------------------------------------------------------
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <string_view>
 #include <utility>
-#include <array>
 // ---------------------------------------------------------------------------
 using sv_it = typename std::string_view::const_iterator;
 // ---------------------------------------------------------------------------
@@ -98,8 +98,8 @@ bool isSimpleEscapeSequenceChar(const char c) {
 }
 // ---------------------------------------------------------------------------
 template <typename _NumberPredicate>
-sv_it findEndOfINumber(sv_it begin, sv_it end, _NumberPredicate _p, qcp::DiagnosticTracker& diagnostics) {
-   auto& numberEnd{begin};
+sv_it findEndOfINumber(sv_it begin, sv_it end, _NumberPredicate _p, qcp::DiagnosticTracker &diagnostics) {
+   auto &numberEnd{begin};
    char prev;
    do {
       numberEnd = std::find_if_not(numberEnd, end, _p);
@@ -118,8 +118,8 @@ sv_it findEndOfINumber(sv_it begin, sv_it end, _NumberPredicate _p, qcp::Diagnos
 }
 // ---------------------------------------------------------------------------
 template <const char lowercaseExponentChar, const char uppercaseExponentChar>
-sv_it findEndOfExponent(sv_it begin, sv_it end, qcp::DiagnosticTracker& diagnostics) {
-   auto& expEnd{begin};
+sv_it findEndOfExponent(sv_it begin, sv_it end, qcp::DiagnosticTracker &diagnostics) {
+   auto &expEnd{begin};
 
    if (expEnd != end && (*expEnd == lowercaseExponentChar or *expEnd == uppercaseExponentChar)) {
       ++expEnd;
@@ -132,7 +132,7 @@ sv_it findEndOfExponent(sv_it begin, sv_it end, qcp::DiagnosticTracker& diagnost
 }
 // ---------------------------------------------------------------------------
 template <const char quoteChar>
-std::pair<std::string, sv_it> getCharSequence(sv_it progBegin, sv_it begin, sv_it end, qcp::DiagnosticTracker& diagnostics) {
+std::pair<std::string, sv_it> getCharSequence(sv_it progBegin, sv_it begin, sv_it end, qcp::DiagnosticTracker &diagnostics) {
    sv_it cSeqEnd{begin + 1};
    std::string literal{};
    while (cSeqEnd != end) {
@@ -153,24 +153,28 @@ std::pair<std::string, sv_it> getCharSequence(sv_it progBegin, sv_it begin, sv_i
             // octal
             int octalCount;
             int value = 0;
-            for (octalCount = 1; octalCount < 3 && (cSeqEnd + octalCount) != end; ++octalCount) {
-               if (!isOctalDigit(*(cSeqEnd + octalCount))) {
-                  diagnostics << "invalid octal escape sequence" << std::endl;
+            for (octalCount = 0; octalCount < 3 && (cSeqEnd + octalCount) != end; ++octalCount) {
+               char c = *(cSeqEnd + octalCount);
+               if (!isOctalDigit(c)) {
                   break;
-               } else {
-                  value = value * 8 + (*cSeqEnd - '0');
                }
+               value = value * 8 + (c - '0');
+            }
+            if (octalCount == 0) {
+               diagnostics << "invalid octal escape sequence" << std::endl;
+            } else if (value > 255) {
+               diagnostics << "octal escape sequence out of range" << std::endl;
             }
             cSeqEnd += octalCount;
             literal += static_cast<char>(value);
          } else if (*cSeqEnd == 'x') {
             // hex
             ++cSeqEnd;
-            char* endPtr;
+            char *endPtr;
             long value = strtol(cSeqEnd, &endPtr, 16);
             // todo: too large char or w_char
 
-            if (std::distance(&*cSeqEnd, static_cast<const char*>(endPtr)) == 0) {
+            if (std::distance(&*cSeqEnd, static_cast<const char *>(endPtr)) == 0) {
                diagnostics << "invalid hex escape sequence" << std::endl;
             }
             cSeqEnd = endPtr;
@@ -179,7 +183,34 @@ std::pair<std::string, sv_it> getCharSequence(sv_it progBegin, sv_it begin, sv_i
             // universal character name
             diagnostics << qcp::DiagnosticMessage::Kind::WARNING << "universal character name not supported" << std::endl;
          } else if (isSimpleEscapeSequenceChar(*cSeqEnd)) {
-            literal += *cSeqEnd;
+            char c;
+            switch (*cSeqEnd) {
+               case 'a':
+                  c = '\a';
+                  break;
+               case 'b':
+                  c = '\b';
+                  break;
+               case 'f':
+                  c = '\f';
+                  break;
+               case 'n':
+                  c = '\n';
+                  break;
+               case 'r':
+                  c = '\r';
+                  break;
+               case 't':
+                  c = '\t';
+                  break;
+               case 'v':
+                  c = '\v';
+                  break;
+               default:
+                  c = *cSeqEnd;
+                  break;
+            }
+            literal += c;
             ++cSeqEnd;
          } else {
             diagnostics << qcp::SrcLoc(progBegin, begin, cSeqEnd) << "unknown escape sequence" << std::endl;
@@ -222,7 +253,7 @@ Tokenizer::const_iterator Tokenizer::cend() const {
    return end();
 }
 // ---------------------------------------------------------------------------
-const std::string_view& Tokenizer::data() const {
+const std::string_view &Tokenizer::data() const {
    return prog_;
 }
 // ---------------------------------------------------------------------------
@@ -361,7 +392,7 @@ sv_it Tokenizer::const_iterator::getNumberConst(sv_it begin) {
    }
 
    errno = 0;
-   char* pos;
+   char *pos;
 
    SrcLoc loc{progBegin_, begin, suffixEnd};
    if (isFloat) {
@@ -659,7 +690,7 @@ sv_it Tokenizer::const_iterator::getCCharSequence(sv_it begin) {
    return cSeqEnd;
 }
 // ---------------------------------------------------------------------------
-Tokenizer::const_iterator& Tokenizer::const_iterator::operator++() {
+Tokenizer::const_iterator &Tokenizer::const_iterator::operator++() {
    prevLoc_ = token_.getLoc();
    if (prog_.empty()) {
       token_ = Token(TK::END);
@@ -710,7 +741,7 @@ find_token_start:
          begin = prog_.begin();
          goto find_token_start;
       } else if (*begin == '/' && second == '*') {
-         const char* commentEnd = "*/";
+         const char *commentEnd = "*/";
          end = std::search(begin + 1, prog_.end(), commentEnd, commentEnd + 2);
          if (end == prog_.end()) {
             *diagnostics_ << SrcLoc(progBegin_, begin, end) << "unterminated comment" << std::endl;
@@ -727,7 +758,7 @@ find_token_start:
       // todo: (jr) u8, u, U, L prefix not supported
       end = std::find_if_not(begin, prog_.end(), isIdentCont);
       std::string_view ident{begin, end};
-      const token::GPerfToken* t = token::ReservedKeywordHash::isInWordSet(ident.data(), ident.size());
+      const token::GPerfToken *t = token::ReservedKeywordHash::isInWordSet(ident.data(), ident.size());
       // todo: (jr) handle constants
       SrcLoc loc{progBegin_, begin, end};
       if (t) {
