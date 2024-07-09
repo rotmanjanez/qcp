@@ -29,9 +29,6 @@ std::size_t DiagnosticMessage::translationUnitLine() const {
 std::size_t DiagnosticMessage::line() const {
    auto fileIt = findFileBegin();
    std::size_t fileOffset = fileIt->second.second;
-   // if (tracker_.lineBreaks_.back() < loc_.value().loc()) {
-   //    return fileOffset tracker_.lineBreaks_.size();
-   // }
    return translationUnitLine() - fileIt->first + fileOffset;
 }
 // ---------------------------------------------------------------------------
@@ -54,7 +51,9 @@ std::string_view DiagnosticMessage::getSourceLine() const {
    if (lineBegin == tracker_.lineBreaks_.end()) {
       return {};
    } else if (*lineBegin == tracker_.lineBreaks_.back()) {
-      return tracker_.prog_.substr(*lineBegin + 1);
+      auto beginIt = tracker_.prog_.begin() + *lineBegin + 1;
+      auto endIt = std::find(beginIt, tracker_.prog_.end(), '\n');
+      return std::string_view{beginIt, endIt};
    }
    // do not include the newline character at the beginning and end of the line
    auto off = *lineBegin + 1;
@@ -122,6 +121,7 @@ DiagnosticTracker& DiagnosticTracker::operator<<(std::ostream& (*pf)(std::ostrea
       DiagnosticMessage diag{*this, os_.str(), loc_, kind_};
       if (!silenced || kind_ == DiagnosticMessage::Kind::NOTE) {
          diagnostics_.push_back(diag);
+         std::cerr << diag << '\n';
       }
       os_.str("");
       loc_.reset();

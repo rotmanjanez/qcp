@@ -26,7 +26,7 @@ class Tracer {
    void printIndent(bool normalLog = true) {
       if (indent > 40) {
          // todo: remove
-         throw std::runtime_error("Indentation limit reached");
+         assert(false && "Indentation limit reached");
       }
       if (newLine) {
          for (int i = 0; i < indent; ++i) {
