@@ -6,22 +6,38 @@
 #include <cassert>
 #include <iostream>
 #include <algorithm>
+#include <string_view>
 // ---------------------------------------------------------------------------
 namespace qcp {
 // ---------------------------------------------------------------------------
 std::vector<std::string> StringPool::strings_(1);
+std::unordered_map<std::size_t, std::vector<unsigned>> StringPool::map_{};
 // ---------------------------------------------------------------------------
 unsigned StringPool::insert(const char* str) {
    return insert(std::string(str));
 }
 // ---------------------------------------------------------------------------
 unsigned StringPool::insert(std::string&& str) {
-   auto it = std::find(strings_.begin(), strings_.end(), str);
-   if (it != strings_.end()) {
-      return std::distance(strings_.begin(), it);
-   }
+   std::size_t h = std::hash<std::string>{}(str);
+   auto mIt = map_.find(h);
+   if (mIt != map_.end()) {
+      std::vector<unsigned>& range = mIt->second;
+      auto vIt = std::find_if(range.begin(), range.end(), [&str](unsigned idx) {
+         return strings_[idx] == str;
+      });
+
+      if (vIt != range.end()) {
+         return *vIt;
+      }
+   } 
+   unsigned idx = strings_.size();
    strings_.emplace_back(std::move(str));
-   return strings_.size() - 1;
+   if (mIt == map_.end()) {
+      map_[h] = {idx};
+   } else {
+      map_[h].push_back(idx);
+   }
+   return idx;
 }
 // ---------------------------------------------------------------------------
 Ident::operator std::string_view() const {

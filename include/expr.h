@@ -7,29 +7,30 @@
 #include "scope.h"
 #include "token.h"
 #include "type.h"
+#include "scopeinfo.h"
 // ---------------------------------------------------------------------------
 #include <ostream>
 // ---------------------------------------------------------------------------
 // some expression tracking necessary for types and operator precedence
 namespace qcp {
 // ---------------------------------------------------------------------------
-template <typename _EmitterT>
+template <typename T>
 class Expr {
-   template <typename T>
-   friend void dump(std::ostream& os, const Expr<T>& expr, int indent);
+   template <typename U>
+   friend void dump(std::ostream& os, const Expr<U>& expr, int indent);
 
    public:
-   using trait = emitter::emitter_traits<_EmitterT>;
+   using trait = emitter::emitter_traits<T>;
    using Type = typename trait::Type;
    using ssa_t = typename trait::ssa_t;
    using value_t = typename trait::value_t;
-   using ScopeInfo = typename trait::ScopeInfo;
+   using ScopeInfo = scope::ScopeInfo<T>;
 
    using Token = token::Token;
    using OpSpec = op::OpSpec;
    using OpKind = op::Kind;
 
-   using Scope = Scope<Ident, ScopeInfo>;
+   using Scope = scope::Scope<Ident, ScopeInfo>;
 
    using expr_t = std::unique_ptr<Expr>;
 
