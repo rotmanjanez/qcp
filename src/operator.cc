@@ -36,6 +36,8 @@ OpSpec getOpSpec(const Kind kind) {
        {13, false},
        {14, false}, {14, false}, {14, false}, {14, false}, {14, false}, {14, false}, {14, false}, {14, false}, {14, false}, {14, false}, {14, false},
        {15, true},
+       // END
+       {-1, false},
        // clang-format on
    };
    return opspecs[static_cast<int>(kind)];
@@ -48,6 +50,18 @@ bool isAssignmentOp(const Kind kind) {
 // todo: check if this is coorect
 bool isBitwiseOp(const Kind kind) {
    return kind == Kind::BW_AND || kind == Kind::BW_OR || kind == Kind::BW_XOR || kind == Kind::BW_NOT || kind == Kind::SHL || kind == Kind::SHR || kind == Kind::SHL_ASSIGN || kind == Kind::SHR_ASSIGN || kind == Kind::BW_AND_ASSIGN || kind == Kind::BW_OR_ASSIGN || kind == Kind::BW_XOR_ASSIGN;
+}
+// ---------------------------------------------------------------------------
+bool isComparisonOp(op::Kind op) {
+   return op >= op::Kind::LT && op <= op::Kind::NE;
+}
+// ---------------------------------------------------------------------------
+bool isIncDecOp(op::Kind op) {
+   return op == op::Kind::PREDEC || op == op::Kind::PREINC || op == op::Kind::POSTDEC || op == op::Kind::POSTINC;
+}
+// ---------------------------------------------------------------------------
+bool isArithmeticBinOp(op::Kind op) {
+   return op >= op::Kind::MUL && op <= op::Kind::SHR;
 }
 // ---------------------------------------------------------------------------
 std::ostream& operator<<(std::ostream& os, const Kind& kind) {
