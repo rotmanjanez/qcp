@@ -41,12 +41,12 @@ class SrcLoc {
 };
 // ---------------------------------------------------------------------------
 template <typename T>
-class locateable : public T {
+class locatable : public T {
    public:
    using T::T;
 
    template <typename... Args>
-   locateable(SrcLoc loc, Args&&... args) : T{std::forward<Args>(args)...}, loc_{loc} {}
+   locatable(SrcLoc loc, Args&&... args) : T{std::forward<Args>(args)...}, loc_{loc} {}
 
    SrcLoc loc() const {
       return loc_;
@@ -57,9 +57,9 @@ class locateable : public T {
 };
 // ---------------------------------------------------------------------------
 template <typename T>
-class locateable<T*> {
+class locatable<T*> {
    public:
-   locateable(T* ptr, SrcLoc loc) : ptr_{ptr}, loc_{loc} {}
+   locatable(T* ptr, SrcLoc loc) : ptr_{ptr}, loc_{loc} {}
 
    T* operator->() {
       return ptr_;
