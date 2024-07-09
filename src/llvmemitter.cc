@@ -1,14 +1,22 @@
 // ---------------------------------------------------------------------------
 // qcp
 // ---------------------------------------------------------------------------
-#include "basetype.h"
 #include "llvmemitter.h"
+#include "basetype.h"
 #include "operator.h"
 #include "type.h"
 #include "typefactory.h"
 // ---------------------------------------------------------------------------
 #include <span>
 #include <string>
+// ---------------------------------------------------------------------------
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Target/TargetOptions.h"
+#include "llvm/TargetParser/Host.h"
+#include <llvm/IR/Verifier.h>
 // ---------------------------------------------------------------------------
 namespace {
 // ---------------------------------------------------------------------------
@@ -26,7 +34,9 @@ Instr::BinaryOps toLLVMIntegralBinOp(OpKind kind) {
       case OpKind::REM: return Instr::SRem;
       case OpKind::L_AND: return Instr::And;
       case OpKind::L_OR: return Instr::Or;
+      case OpKind::BW_AND: return Instr::And;
       case OpKind::BW_XOR: return Instr::Xor;
+      case OpKind::BW_OR: return Instr::Or;
       case OpKind::SHL: return Instr::Shl;
       case OpKind::SHR: return Instr::AShr;
       default: return llvm::Instruction::BinaryOps::BinaryOpsEnd;
@@ -113,7 +123,7 @@ llvm::CmpInst::Predicate toLLVMFloatCmpOp(OpKind kind) {
 }
 // ---------------------------------------------------------------------------
 llvm::CmpInst::Predicate toLLVMCmpOp(Type ty, OpKind kind) {
-   if (ty->isIntegerTy()) {
+   if (ty->isIntegerTy() || ty->isPointerTy()) {
       return ty->isSignedTy() ? toLLVMSignedCmpOp(kind) : toLLVMUnsignedCmpOp(kind);
    } else if (ty->isFloatingTy()) {
       return toLLVMFloatCmpOp(kind);
@@ -137,25 +147,27 @@ llvm::Instruction::CastOps toLLVMCastOp(qcp::type::Cast cast) {
    return static_cast<llvm::Instruction::CastOps>(static_cast<int>(llvm::Instruction::CastOps::Trunc) + static_cast<int>(cast));
 }
 // ---------------------------------------------------------------------------
-llvm::Constant* toLLVMConstant(const typename LLVMEmitter::const_or_iconst_t& val) {
-   if (typename LLVMEmitter::const_t* const* c = std::get_if<typename LLVMEmitter::const_t*>(&val)) {
+llvm::Constant *toLLVMConstant(const typename LLVMEmitter::const_or_iconst_t &val) {
+   if (typename LLVMEmitter::const_t *const *c = std::get_if<typename LLVMEmitter::const_t *>(&val)) {
       return *c;
+   } else if (typename LLVMEmitter::iconst_t *const *ic = std::get_if<typename LLVMEmitter::iconst_t *>(&val)) {
+      return *ic;
    }
-   return static_cast<typename LLVMEmitter::const_t*>(std::get<typename LLVMEmitter::iconst_t*>(val));
+   assert(false && "Invalid constant type");
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::const_or_iconst_t toQCPConstant(llvm::Constant* val) {
-   if (llvm::ConstantInt* c = llvm::dyn_cast<llvm::ConstantInt>(val)) {
+typename LLVMEmitter::const_or_iconst_t toQCPConstant(llvm::Constant *val) {
+   if (llvm::ConstantInt *c = llvm::dyn_cast<llvm::ConstantInt>(val)) {
       return c;
    }
    return val;
 }
 // ---------------------------------------------------------------------------
-llvm::Constant* llvmUint32T(llvm::LLVMContext& Ctx, std::uint32_t val) {
+llvm::Constant *llvmUint32T(llvm::LLVMContext &Ctx, std::uint32_t val) {
    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), val);
 }
 // ---------------------------------------------------------------------------
-llvm::Constant* llvmUint64T(llvm::LLVMContext& Ctx, uint64_t val) {
+llvm::Constant *llvmUint64T(llvm::LLVMContext &Ctx, uint64_t val) {
    return llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), val);
 }
 // ---------------------------------------------------------------------------
@@ -164,97 +176,178 @@ llvm::Constant* llvmUint64T(llvm::LLVMContext& Ctx, uint64_t val) {
 namespace qcp {
 namespace emitter {
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ty_t* LLVMEmitter::emitVoidTy() {
+LLVMEmitter::LLVMEmitter() : mod_{std::make_unique<llvm::Module>("qcp", Ctx)}, Mod{&*mod_}, Builder{Ctx} {
+   // form https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl08.html
+
+   Mod->setTargetTriple("x86_64-unknown-linux-gnu");
+
+   auto TargetTriple = llvm::sys::getDefaultTargetTriple();
+
+   llvm::InitializeNativeTarget();
+   llvm::InitializeNativeTargetAsmParser();
+   llvm::InitializeNativeTargetAsmPrinter();
+
+   std::string Error;
+   auto Target = llvm::TargetRegistry::lookupTarget(TargetTriple, Error);
+
+   if (!Target) {
+      llvm::errs() << Error;
+      return;
+   }
+
+   auto CPU = "generic";
+   auto Features = "";
+
+   llvm::TargetOptions opt;
+   TM = Target->createTargetMachine(TargetTriple, CPU, Features, opt, llvm::Reloc::PIC_);
+   Mod->setDataLayout(TM->createDataLayout());
+   Mod->setTargetTriple(TargetTriple);
+}
+// ---------------------------------------------------------------------------
+void LLVMEmitter::writeToObjFile(int fd) {
+   llvm::raw_fd_ostream OS(fd, false);
+   writeToObjFileImpl(OS);
+}
+// ---------------------------------------------------------------------------
+void LLVMEmitter::writeToObjFile(const std::string &filename) {
+   std::error_code EC;
+   llvm::raw_fd_ostream OS(filename, EC);
+
+   if (EC) {
+      llvm::errs() << "Could not open file: " << EC.message();
+      return;
+   }
+
+   writeToObjFileImpl(OS);
+}
+// ---------------------------------------------------------------------------
+void LLVMEmitter::writeToObjFileImpl(llvm::raw_fd_ostream &OS) {
+   std::error_code EC;
+
+   if (EC) {
+      llvm::errs() << "Could not open file: " << EC.message();
+      return;
+   }
+
+   llvm::legacy::PassManager pass;
+   auto FileType = llvm::CodeGenFileType::ObjectFile;
+
+   if (TM->addPassesToEmitFile(pass, OS, nullptr, FileType)) {
+      llvm::errs() << "TargetMachine can't emit a file of this type";
+      return;
+   }
+
+   pass.run(*Mod);
+   OS.flush();
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::ty_t *LLVMEmitter::emitVoidTy() {
    return llvm::Type::getVoidTy(Ctx);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ty_t* LLVMEmitter::emitIntTy(unsigned bits) {
+typename LLVMEmitter::ty_t *LLVMEmitter::emitIntTy(unsigned bits) {
    return llvm::IntegerType::get(Ctx, bits);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ty_t* LLVMEmitter::emitFloatTy() {
+typename LLVMEmitter::ty_t *LLVMEmitter::emitFloatTy() {
    return llvm::Type::getFloatTy(Ctx);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ty_t* LLVMEmitter::emitDoubleTy() {
+typename LLVMEmitter::ty_t *LLVMEmitter::emitDoubleTy() {
    return llvm::Type::getDoubleTy(Ctx);
 }
 // ---------------------------------------------------------------------------
 // todo: how to check if this is supported?
-typename LLVMEmitter::ty_t* LLVMEmitter::emitLongDoubleTy() {
+typename LLVMEmitter::ty_t *LLVMEmitter::emitLongDoubleTy() {
    return emitDoubleTy();
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ty_t* LLVMEmitter::emitPtrTo(Type ty) {
-   return static_cast<ty_t*>(ty)->getPointerTo();
+typename LLVMEmitter::ty_t *LLVMEmitter::emitPtrTo(Type ty) {
+   return static_cast<ty_t *>(ty)->getPointerTo();
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ty_t* LLVMEmitter::emitFnTy(Type retTy, std::vector<Type> argTys, bool isVarArgFnTy) {
-   std::vector<ty_t*> emitterArgTys;
+typename LLVMEmitter::ty_t *LLVMEmitter::emitFnTy(Type retTy, std::vector<Type> argTys, bool isVarArgFnTy) {
+   std::vector<ty_t *> emitterArgTys;
    emitterArgTys.reserve(argTys.size());
-   for (auto& argTy : argTys) {
-      emitterArgTys.push_back(static_cast<ty_t*>(argTy));
+   for (auto &argTy : argTys) {
+      emitterArgTys.push_back(static_cast<ty_t *>(argTy));
    }
-   return llvm::FunctionType::get(static_cast<ty_t*>(retTy), emitterArgTys, isVarArgFnTy);
+   return llvm::FunctionType::get(static_cast<ty_t *>(retTy), emitterArgTys, isVarArgFnTy);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ty_t* LLVMEmitter::emitArrayTy(Type ty, iconst_t* size) {
-   return llvm::ArrayType::get(static_cast<ty_t*>(ty), size->getZExtValue());
+typename LLVMEmitter::ty_t *LLVMEmitter::emitArrayTy(Type ty, iconst_t *size) {
+   return llvm::ArrayType::get(static_cast<ty_t *>(ty), size->getZExtValue());
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ty_t* LLVMEmitter::emitStructTy(std::span<const Type> tys, bool incomplete, Ident name) {
+typename LLVMEmitter::ty_t *LLVMEmitter::emitStructTy(std::span<const Type> tys, bool incomplete, Ident name) {
    if (incomplete) {
       return llvm::StructType::create(Ctx, static_cast<std::string>(name));
    }
-   std::vector<ty_t*> llvmTys;
+   std::vector<ty_t *> llvmTys;
    llvmTys.reserve(tys.size());
-   for (const auto& ty : tys) {
-      llvmTys.push_back(static_cast<ty_t*>(ty));
+   for (const auto &ty : tys) {
+      llvmTys.push_back(static_cast<ty_t *>(ty));
    }
    return llvm::StructType::create(Ctx, llvmTys, static_cast<std::string>(name));
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitUndef() {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitUndef() {
    return llvm::UndefValue::get(llvm::Type::getVoidTy(Ctx));
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitPoison() {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitPoison() {
    return llvm::PoisonValue::get(llvm::Type::getVoidTy(Ctx));
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitGlobalVar(Type ty, Ident name) {
-   return new llvm::GlobalVariable(*Mod, static_cast<ty_t*>(ty), false, llvm::GlobalValue::ExternalLinkage, nullptr, static_cast<std::string>(name).c_str());
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitGlobalVar(Type ty, Ident name) {
+   return new llvm::GlobalVariable(*Mod, static_cast<ty_t *>(ty), false, llvm::GlobalValue::ExternalLinkage, nullptr, static_cast<std::string>(name).c_str());
 }
 // ---------------------------------------------------------------------------
-void LLVMEmitter::setInitValueGlobalVar(ssa_t* val, const_or_iconst_t init) {
-   static_cast<llvm::GlobalVariable*>(val)->setInitializer(toLLVMConstant(init));
+void LLVMEmitter::setInitValueGlobalVar(ssa_t *val, const_or_iconst_t init) {
+   static_cast<llvm::GlobalVariable *>(val)->setInitializer(toLLVMConstant(init));
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::fn_t* LLVMEmitter::emitFnProto(Type fnTy, Ident name) {
-   return llvm::Function::Create(static_cast<llvm::FunctionType*>(static_cast<ty_t*>(fnTy)), llvm::Function::ExternalLinkage, static_cast<std::string>(name).c_str(), Mod);
+typename LLVMEmitter::fn_t *LLVMEmitter::emitFnProto(Type fnTy, bool alwaysInline = false, bool noReturn = false, Ident name) {
+   fn_t *fn = llvm::Function::Create(static_cast<llvm::FunctionType *>(static_cast<ty_t *>(fnTy)), llvm::Function::ExternalLinkage, static_cast<std::string>(name).c_str(), Mod);
+   fn->setCallingConv(llvm::CallingConv::C);
+   // make params noundef
+   for (auto &arg : fn->args()) {
+      arg.addAttr(llvm::Attribute::NoUndef);
+   }
+   if (alwaysInline) {
+      fn->addFnAttr(llvm::Attribute::AlwaysInline);
+   }
+   if (noReturn) {
+      fn->addFnAttr(llvm::Attribute::NoReturn);
+   }
+   return fn;
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::bb_t* LLVMEmitter::emitFn(fn_t* fnProto) {
+typename LLVMEmitter::bb_t *LLVMEmitter::emitFn(fn_t *fnProto) {
    return llvm::BasicBlock::Create(Ctx, "", fnProto);
 }
 // ---------------------------------------------------------------------------
-bool LLVMEmitter::isFnProto(fn_t* fn) {
+void LLVMEmitter::finalizeFn(fn_t *fn) {
+   llvm::verifyFunction(*fn, &llvm::errs());
+}
+// ---------------------------------------------------------------------------
+bool LLVMEmitter::isFnProto(fn_t *fn) {
    return fn->isDeclaration();
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::getParam(fn_t* fn, unsigned idx) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::getParam(fn_t *fn, unsigned idx) {
    return fn->getArg(idx);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::bb_t* LLVMEmitter::emitBB(fn_t* fn, bb_t* insertBefore, Ident name) {
+typename LLVMEmitter::bb_t *LLVMEmitter::emitBB(fn_t *fn, bb_t *insertBefore, Ident name) {
    return llvm::BasicBlock::Create(Ctx, static_cast<std::string>(name).c_str(), fn, insertBefore);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitLocalVar([[maybe_unused]] fn_t* fn, bb_t* entry, Type ty, Ident name, bool insertAtBegin) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitLocalVar([[maybe_unused]] fn_t *fn, bb_t *entry, Type ty, Ident name, bool insertAtBegin) {
    return emitAllocaImpl(entry, ty, nullptr, name, insertAtBegin);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitAllocaImpl(bb_t* bb, Type ty, ssa_t* size, Ident name, bool insertAtBegin) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitAllocaImpl(bb_t *bb, Type ty, ssa_t *size, Ident name, bool insertAtBegin) {
    // todo: performance is bad...
    auto it = bb->begin();
    while (!insertAtBegin && it != bb->end() && llvm::isa<llvm::AllocaInst>(it)) {
@@ -262,7 +355,7 @@ typename LLVMEmitter::ssa_t* LLVMEmitter::emitAllocaImpl(bb_t* bb, Type ty, ssa_
    }
    // insert the alloca instruction before the first non-alloca instruction
    Builder.SetInsertPoint(bb, it);
-   llvm::Type* type = static_cast<ty_t*>(ty);
+   llvm::Type *type = static_cast<ty_t *>(ty);
    if (ty->isBoolTy()) {
       type = llvm::Type::getInt8Ty(Ctx);
    }
@@ -270,97 +363,104 @@ typename LLVMEmitter::ssa_t* LLVMEmitter::emitAllocaImpl(bb_t* bb, Type ty, ssa_
    return Builder.CreateAlloca(type, size, static_cast<std::string>(name).c_str());
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitAlloca(bb_t* bb, Type ty, ssa_t* size, Ident name) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitAlloca(bb_t *bb, Type ty, ssa_t *size, Ident name) {
    return emitAllocaImpl(bb, ty, size, name, false);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitLoad(bb_t* bb, Type ty, ssa_t* ptr, Ident name) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitLoad(bb_t *bb, Type ty, ssa_t *ptr, Ident name) {
    Builder.SetInsertPoint(bb);
    if (ty->isBoolTy()) {
       auto result = Builder.CreateLoad(llvm::Type::getInt8Ty(Ctx), ptr, static_cast<std::string>(name).c_str());
       return llvm::CastInst::Create(llvm::CastInst::Trunc, result, llvm::Type::getInt1Ty(Ctx), "", bb);
    }
-   return Builder.CreateLoad(static_cast<ty_t*>(ty), ptr, static_cast<std::string>(name).c_str());
+   return Builder.CreateLoad(static_cast<ty_t *>(ty), ptr, ty.qualifiers.VOLATILE, static_cast<std::string>(name).c_str());
 }
 // ---------------------------------------------------------------------------
-void LLVMEmitter::emitStore(bb_t* bb, Type ty, value_t value, ssa_t* ptr) {
+void LLVMEmitter::emitStore(bb_t *bb, Type ty, value_t value, ssa_t *ptr) {
    Builder.SetInsertPoint(bb);
    auto llvmVal = asLLVMValue(value);
    if (ty->isBoolTy()) {
       llvmVal = llvm::CastInst::Create(llvm::CastInst::ZExt, llvmVal, llvm::Type::getInt8Ty(Ctx), "", bb);
    }
-   Builder.CreateStore(llvmVal, ptr);
+   Builder.CreateStore(llvmVal, ptr, ty.qualifiers.VOLATILE);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitJump(bb_t* bb, bb_t* target) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitJump(bb_t *bb, bb_t *target) {
    return llvm::BranchInst::Create(target, bb);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitBranch(bb_t* bb, bb_t* trueBB, bb_t* falseBB, value_t cond) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitBranch(bb_t *bb, bb_t *trueBB, bb_t *falseBB, value_t cond) {
    return llvm::BranchInst::Create(trueBB, falseBB, asLLVMValue(cond), bb);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitRet(bb_t* bb, value_t value) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitRet(bb_t *bb, value_t value) {
    return llvm::ReturnInst::Create(Ctx, asLLVMValue(value), bb);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::iconst_t* LLVMEmitter::emitIConst(Type ty, unsigned long value) {
-   return static_cast<iconst_t*>(llvm::ConstantInt::get(static_cast<ty_t*>(ty), value, true));
+typename LLVMEmitter::const_t *LLVMEmitter::emitFnPtr(Type ty, fn_t *fn) {
+   return static_cast<const_t *>(fn);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::const_t* LLVMEmitter::emitFPConst(Type ty, double value) {
-   return llvm::ConstantFP::get(static_cast<ty_t*>(ty), value);
+typename LLVMEmitter::iconst_t *LLVMEmitter::emitIConst(Type ty, unsigned long value) {
+   return static_cast<iconst_t *>(llvm::ConstantInt::get(static_cast<ty_t *>(ty), value, true));
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::const_t* LLVMEmitter::emitNullPtr(Type ty) {
-   return llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(static_cast<ty_t*>(ty)));
+typename LLVMEmitter::const_t *LLVMEmitter::emitFPConst(Type ty, double value) {
+   return llvm::ConstantFP::get(static_cast<ty_t *>(ty), value);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::const_t* LLVMEmitter::emitArrayConst(Type ty, std::span<const const_or_iconst_t> values) {
-   std::vector<llvm::Constant*> llvmValues;
+typename LLVMEmitter::const_t *LLVMEmitter::emitNullPtr(Type ty) {
+   return llvm::ConstantPointerNull::get(static_cast<llvm::PointerType *>(static_cast<ty_t *>(ty)));
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::const_t *LLVMEmitter::emitArrayConst(Type ty, std::span<const const_or_iconst_t> values) {
+   std::vector<llvm::Constant *> llvmValues;
    llvmValues.reserve(values.size());
-   for (const auto& val : values) {
+   for (const auto &val : values) {
       llvmValues.push_back(toLLVMConstant(val));
    }
-   return llvm::ConstantArray::get(static_cast<llvm::ArrayType*>(static_cast<ty_t*>(ty)), llvmValues);
+   return llvm::ConstantArray::get(static_cast<llvm::ArrayType *>(static_cast<ty_t *>(ty)), llvmValues);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::const_t* LLVMEmitter::emitArrayConst(Type ty, const_or_iconst_t value) {
-   std::vector<llvm::Constant*> llvmValues(ty->getArraySize(), toLLVMConstant(value));
-   return llvm::ConstantArray::get(static_cast<llvm::ArrayType*>(static_cast<ty_t*>(ty)), llvmValues);
+typename LLVMEmitter::const_t *LLVMEmitter::emitArrayConst(Type ty, const_or_iconst_t value) {
+   std::vector<llvm::Constant *> llvmValues(ty->getArraySize(), toLLVMConstant(value)); // todo: ask alexis how to handle this
+   return llvm::ConstantArray::get(static_cast<llvm::ArrayType *>(static_cast<ty_t *>(ty)), llvmValues);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::const_t* LLVMEmitter::emitStructConst(Type ty, std::span<const const_or_iconst_t> values) {
-   std::vector<llvm::Constant*> llvmValues;
+typename LLVMEmitter::const_t *LLVMEmitter::emitStructConst(Type ty, std::span<const const_or_iconst_t> values) {
+   std::vector<llvm::Constant *> llvmValues;
    llvmValues.reserve(values.size());
-   for (const auto& val : values) {
+   for (const auto &val : values) {
       llvmValues.push_back(toLLVMConstant(val));
    }
-   return llvm::ConstantStruct::get(static_cast<llvm::StructType*>(static_cast<ty_t*>(ty)), llvmValues);
+   return llvm::ConstantStruct::get(static_cast<llvm::StructType *>(static_cast<ty_t *>(ty)), llvmValues);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::const_t* LLVMEmitter::emitStringLiteral(const std::string_view str) {
+typename LLVMEmitter::const_t *LLVMEmitter::emitStringLiteral(const std::string_view str) {
    return llvm::ConstantDataArray::getString(Ctx, str);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::phi_t* LLVMEmitter::emitPhi(bb_t* bb, Type ty, Ident name) {
-   return llvm::PHINode::Create(static_cast<ty_t*>(ty), 0, static_cast<std::string>(name).c_str(), bb);
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitPhi(bb_t *bb, Type ty, std::span<std::pair<value_t, bb_t *>> incoming, Ident name) {
+   auto phi = llvm::PHINode::Create(static_cast<ty_t *>(ty), incoming.size(), static_cast<std::string>(name).c_str(), bb);
+   for (const auto &[value, pred] : incoming) {
+      phi->addIncoming(asLLVMValue(value), pred);
+   }
+   return phi;
 }
 // ---------------------------------------------------------------------------
-void LLVMEmitter::addIncoming(phi_t* phi, ssa_t* value, bb_t* bb, Ident name) {}
-// ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitBinOp(bb_t* bb, Type ty, op::Kind kind, value_t lhs, value_t rhs, ssa_t* dest, Ident name) {
-   ssa_t* lhs_ = asLLVMValue(lhs);
-   ssa_t* rhs_ = asLLVMValue(rhs);
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitBinOp(bb_t *bb, Type ty, op::Kind kind, value_t lhs, value_t rhs, ssa_t *dest, Ident name) {
+   Builder.SetInsertPoint(bb);
+   ssa_t *lhs_ = asLLVMValue(lhs);
+   ssa_t *rhs_ = asLLVMValue(rhs);
    if (auto [isAssign, binOp] = toLLVMBinOp(ty, kind); binOp != Instr::BinaryOps::BinaryOpsEnd) {
-      auto* result = llvm::BinaryOperator::Create(binOp, lhs_, rhs_, static_cast<std::string>(name).c_str(), bb);
+      auto *result = llvm::BinaryOperator::Create(binOp, lhs_, rhs_, static_cast<std::string>(name).c_str(), bb);
       if (isAssign) {
          Builder.CreateStore(result, dest);
       }
       return result;
    } else if (kind == OpKind::ASSIGN) {
       Builder.CreateStore(rhs_, dest);
-      return lhs_;
+      return rhs_;
    } else if (auto cmpOp = toLLVMCmpOp(ty, kind); cmpOp != llvm::CmpInst::Predicate::BAD_ICMP_PREDICATE) {
       auto cmpInst = ty->isFloatingTy() ? llvm::Instruction::FCmp : llvm::Instruction::ICmp;
       return llvm::CmpInst::Create(cmpInst, cmpOp, lhs_, rhs_, static_cast<std::string>(name).c_str(), bb);
@@ -369,67 +469,70 @@ typename LLVMEmitter::ssa_t* LLVMEmitter::emitBinOp(bb_t* bb, Type ty, op::Kind 
    assert(false && "not implemented");
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::const_or_iconst_t LLVMEmitter::emitConstBinOp([[maybe_unused]] bb_t* bb, Type ty, op::Kind kind, const_or_iconst_t lhs, const_or_iconst_t rhs, [[maybe_unused]] Ident name) {
+typename LLVMEmitter::const_or_iconst_t LLVMEmitter::emitConstBinOp([[maybe_unused]] bb_t *bb, Type ty, op::Kind kind, const_or_iconst_t lhs, const_or_iconst_t rhs, [[maybe_unused]] Ident name) {
    auto lhs_ = toLLVMConstant(lhs);
    auto rhs_ = toLLVMConstant(rhs);
    if (auto [isAssign, binOp] = toLLVMBinOp(ty, kind); binOp != Instr::BinaryOps::BinaryOpsEnd) {
       return toQCPConstant(llvm::ConstantExpr::get(binOp, lhs_, rhs_));
    } else if (auto cmpOp = toLLVMCmpOp(ty, kind); cmpOp != llvm::CmpInst::Predicate::BAD_ICMP_PREDICATE) {
-      return static_cast<iconst_t*>(llvm::ConstantExpr::getCompare(cmpOp, lhs_, rhs_));
+      return static_cast<iconst_t *>(llvm::ConstantExpr::getCompare(cmpOp, lhs_, rhs_));
    }
 
    assert(false && "not implemented");
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitIncDecOp(bb_t* bb, Type ty, op::Kind kind, ssa_t* operand, Ident name) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitIncDecOp(bb_t *bb, Type ty, op::Kind kind, ssa_t *operand, Ident name) {
    auto [isPost, plusMinusOne] = decomposeIncDecOp(kind);
-   ssa_t* value = emitLoad(bb, ty, operand, name);
-   const_t* incDecVal = nullptr;
-   ssa_t* result;
+   ssa_t *value = emitLoad(bb, ty, operand, name);
+   const_t *incDecVal = nullptr;
+   ssa_t *result;
    Builder.SetInsertPoint(bb);
    if (ty->isPointerTy()) {
-      result = Builder.CreateGEP(static_cast<ty_t*>(ty->getPointedToTy()), value, llvmUint32T(Ctx, plusMinusOne), static_cast<std::string>(name).c_str(), true);
+      result = Builder.CreateGEP(static_cast<ty_t *>(ty->getPointedToTy()), value, llvmUint32T(Ctx, plusMinusOne), static_cast<std::string>(name).c_str(), true);
+   } else if (ty->isFloatingTy()) {
+      incDecVal = llvm::ConstantFP::get(static_cast<ty_t *>(ty), plusMinusOne);
+      result = llvm::BinaryOperator::Create(Instr::FAdd, value, incDecVal, "", bb);
    } else {
-      incDecVal = llvm::ConstantInt::get(static_cast<ty_t*>(ty), plusMinusOne);
+      incDecVal = llvm::ConstantInt::get(static_cast<ty_t *>(ty), plusMinusOne);
       result = llvm::BinaryOperator::Create(Instr::Add, value, incDecVal, "", bb);
    }
    Builder.CreateStore(result, operand);
    return isPost ? value : result;
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitNeg(bb_t* bb, Type ty, ssa_t* operand, Ident name) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitNeg(bb_t *bb, Type ty, ssa_t *operand, Ident name) {
    if (ty->isFloatingTy()) {
       return llvm::UnaryOperator::Create(Instr::FNeg, operand, static_cast<std::string>(name).c_str(), bb);
    } else if (ty->kind() == type::Kind::BOOL) {
-      llvm::ConstantInt* True = llvm::ConstantInt::getTrue(Ctx);
+      llvm::ConstantInt *True = llvm::ConstantInt::getTrue(Ctx);
       return llvm::BinaryOperator::Create(Instr::Xor, operand, True, static_cast<std::string>(name).c_str(), bb);
    }
-   const_t* zero = llvm::ConstantInt::get(static_cast<ty_t*>(ty), 0);
+   const_t *zero = llvm::ConstantInt::get(static_cast<ty_t *>(ty), 0);
    return llvm::BinaryOperator::Create(Instr::Sub, zero, operand, static_cast<std::string>(name).c_str(), bb);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::const_or_iconst_t LLVMEmitter::emitConstNeg([[maybe_unused]] bb_t* bb, Type ty, const_or_iconst_t operand, [[maybe_unused]] Ident name) {
+typename LLVMEmitter::const_or_iconst_t LLVMEmitter::emitConstNeg([[maybe_unused]] bb_t *bb, Type ty, const_or_iconst_t operand, [[maybe_unused]] Ident name) {
    // todo: check if this is correct
    return toQCPConstant(llvm::ConstantExpr::getNeg(toLLVMConstant(operand)));
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitBWNeg(bb_t* bb, Type ty, ssa_t* operand, Ident name) {
-   const_t* allOnes = llvm::ConstantInt::getAllOnesValue(static_cast<ty_t*>(ty));
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitBWNeg(bb_t *bb, Type ty, ssa_t *operand, Ident name) {
+   const_t *allOnes = llvm::ConstantInt::getAllOnesValue(static_cast<ty_t *>(ty));
    return llvm::BinaryOperator::Create(Instr::Xor, operand, allOnes, static_cast<std::string>(name).c_str(), bb);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::const_or_iconst_t LLVMEmitter::emitConstBWNeg([[maybe_unused]] bb_t* bb, Type ty, const_or_iconst_t operand, [[maybe_unused]] Ident name) {
-   const_t* allOnes = llvm::ConstantInt::getAllOnesValue(static_cast<ty_t*>(ty));
+typename LLVMEmitter::const_or_iconst_t LLVMEmitter::emitConstBWNeg([[maybe_unused]] bb_t *bb, Type ty, const_or_iconst_t operand, [[maybe_unused]] Ident name) {
+   const_t *allOnes = llvm::ConstantInt::getAllOnesValue(static_cast<ty_t *>(ty));
    return toQCPConstant(llvm::ConstantExpr::getXor(toLLVMConstant(operand), allOnes));
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::const_or_iconst_t LLVMEmitter::emitConstCast([[maybe_unused]] bb_t* bb, [[maybe_unused]] Type fromTy, const_or_iconst_t val, Type toTy, qcp::type::Cast cast) {
+typename LLVMEmitter::const_or_iconst_t LLVMEmitter::emitConstCast([[maybe_unused]] bb_t *bb, [[maybe_unused]] Type fromTy, const_or_iconst_t val, Type toTy, qcp::type::Cast cast) {
    switch (cast) {
       case qcp::type::Cast::TRUNC:
       case qcp::type::Cast::PTRTOINT:
       case qcp::type::Cast::INTTOPTR:
       case qcp::type::Cast::BITCAST:
-         return toQCPConstant(llvm::ConstantExpr::getCast(toLLVMCastOp(cast), toLLVMConstant(val), static_cast<ty_t*>(toTy)));
+         return toQCPConstant(llvm::ConstantExpr::getCast(toLLVMCastOp(cast), toLLVMConstant(val), static_cast<ty_t *>(toTy)));
       case qcp::type::Cast::ZEXT:
          return emitIConst(toTy, llvm::dyn_cast<llvm::ConstantInt>(toLLVMConstant(val))->getValue().getZExtValue());
       case qcp::type::Cast::SEXT:
@@ -444,61 +547,82 @@ typename LLVMEmitter::const_or_iconst_t LLVMEmitter::emitConstCast([[maybe_unuse
          return emitFPConst(toTy, llvm::dyn_cast<llvm::ConstantInt>(toLLVMConstant(val))->getValue().getSExtValue());
       default:
          // todo
-         throw std::runtime_error("Invalid cast");
+         assert(false && "Invalid cast");
    }
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitCast(bb_t* bb, [[maybe_unused]] Type fromTy, ssa_t* val, Type toTy, qcp::type::Cast cast) {
-   return llvm::CastInst::Create(toLLVMCastOp(cast), val, static_cast<ty_t*>(toTy), "", bb);
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitCast(bb_t *bb, [[maybe_unused]] Type fromTy, ssa_t *val, Type toTy, qcp::type::Cast cast) {
+   return llvm::CastInst::Create(toLLVMCastOp(cast), val, static_cast<ty_t *>(toTy), "", bb);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitCall(bb_t* bb, fn_t* fn, std::span<const value_t> args, Ident name) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitCall(bb_t *bb, fn_t *fn, std::span<const value_t> args, Ident name) {
    llvm::FunctionCallee callee{fn};
    return emitCall(bb, callee, args, name);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitCall(bb_t* bb, Type fnTy, ssa_t* fnPtr, std::span<const value_t> args, Ident name) {
-   llvm::FunctionCallee fn{llvm::cast<llvm::FunctionType>(static_cast<ty_t*>(fnTy)), fnPtr};
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitCall(bb_t *bb, Type fnTy, value_t fnPtr, std::span<const value_t> args, Ident name) {
+   llvm::FunctionCallee fn{llvm::cast<llvm::FunctionType>(static_cast<ty_t *>(fnTy)), asLLVMValue(fnPtr)};
    return emitCall(bb, fn, args, name);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitCall(bb_t* bb, llvm::FunctionCallee fn, std::span<const value_t> args, Ident name) {
-   std::vector<llvm::Value*> emitterArgs;
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitCall(bb_t *bb, llvm::FunctionCallee fn, std::span<const value_t> args, Ident name) {
+   std::vector<llvm::Value *> emitterArgs;
    emitterArgs.reserve(args.size());
-   for (auto& arg : args) {
+   for (auto &arg : args) {
       emitterArgs.push_back(asLLVMValue(arg));
    }
    return llvm::CallInst::Create(fn, emitterArgs, static_cast<std::string>(name).c_str(), bb);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::iconst_t* LLVMEmitter::sizeOf(Type ty) {
-   auto size = Mod->getDataLayout().getTypeAllocSize(static_cast<ty_t*>(ty));
+typename LLVMEmitter::iconst_t *LLVMEmitter::sizeOf(Type ty) {
+   auto size = Mod->getDataLayout().getTypeAllocSize(static_cast<ty_t *>(ty));
    return llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), size);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitGEP(bb_t* bb, Type ty, value_t ptr, value_t idx, Ident name) {
-   return emitGEPImpl(bb, ty, asLLVMValue(ptr), std::span<value_t>(&ptr, 1), name, asLLVMValue);
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitGEP(bb_t *bb, Type ty, value_t ptr, value_t idx, Ident name) {
+   return emitGEPImpl(bb, ty, asLLVMValue(ptr), std::span<value_t>(&idx, 1), name, asLLVMValue);
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitGEP(bb_t* bb, Type ty, value_t ptr, std::span<const uint64_t> idx, Ident name) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitGEP(bb_t *bb, Type ty, value_t ptr, std::span<const uint64_t> idx, Ident name) {
    return emitGEPImpl(bb, ty, asLLVMValue(ptr), idx, name, [this](uint64_t val) { return llvmUint64T(Ctx, val); });
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::ssa_t* LLVMEmitter::emitGEP(bb_t* bb, Type ty, value_t ptr, std::span<const std::uint32_t> idx, Ident name) {
+typename LLVMEmitter::ssa_t *LLVMEmitter::emitGEP(bb_t *bb, Type ty, value_t ptr, std::span<const std::uint32_t> idx, Ident name) {
    return emitGEPImpl(bb, ty, asLLVMValue(ptr), idx, name, [this](std::uint32_t val) { return llvmUint32T(Ctx, val); });
 }
 // ---------------------------------------------------------------------------
-typename LLVMEmitter::sw_t* LLVMEmitter::emitSwitch(bb_t* bb, value_t value) {
+typename LLVMEmitter::sw_t *LLVMEmitter::emitSwitch(bb_t *bb, value_t value) {
    return llvm::SwitchInst::Create(asLLVMValue(value), nullptr, 0, bb);
 }
 // ---------------------------------------------------------------------------
-void LLVMEmitter::addSwitchCase(sw_t* sw, iconst_t* value, bb_t* target) {
+void LLVMEmitter::addSwitchCase(sw_t *sw, iconst_t *value, bb_t *target) {
    sw->addCase(value, target);
 }
 // ---------------------------------------------------------------------------
-void LLVMEmitter::addSwitchDefault(sw_t* sw, bb_t* target) {
+void LLVMEmitter::addSwitchDefault(sw_t *sw, bb_t *target) {
    sw->setDefaultDest(target);
 }
+// ---------------------------------------------------------------------------
+void LLVMEmitter::zeroInitGlobalVar(Type ty, ssa_t *val) {
+   static_cast<llvm::GlobalVariable *>(val)->setInitializer(zeroConst(ty));
+}
+// ---------------------------------------------------------------------------
+void LLVMEmitter::zeroInitLocalVar(bb_t *entry, Type ty, ssa_t *val) {
+   Builder.SetInsertPoint(entry);
+   Builder.CreateStore(zeroConst(ty), val);
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::const_t *LLVMEmitter::zeroConst(Type ty) {
+   if (ty->isArrayTy()) {
+      return emitArrayConst(ty, zeroConst(ty->getElementTy()));
+   }
+   return llvm::Constant::getNullValue(static_cast<ty_t *>(ty));
+}
+// ---------------------------------------------------------------------------
+typename LLVMEmitter::const_or_iconst_t LLVMEmitter::emitZeroConst(Type ty) {
+   return {zeroConst(ty)}; // todo: this never returns iconst_t
+}
+
 // ---------------------------------------------------------------------------
 } // namespace emitter
 } // namespace qcp
