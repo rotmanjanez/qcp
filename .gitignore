@@ -2,4 +2,5 @@ build/*
 .vscode/*
 
 test/diagnostics/*
-test/test1/*
+test/tests/*
+test/tests2/*

@@ -19,8 +19,14 @@ function(add_clang_tidy_target TARGET INPUT)
     list(REMOVE_DUPLICATES INPUT)
     list(SORT INPUT)
 
-    message(STATUS "LINT ${TARGET}: ${INPUT}")
+    set(FILENAMES)
+        foreach(FILE ${INPUT})
+        get_filename_component(FILENAME ${FILE} NAME)
+        list(APPEND FILENAMES ${FILENAME})
+    endforeach()
 
+    message(STATUS "LINT ${TARGET}: ${FILENAMES}")
+    
     # Add target
     add_custom_target(${TARGET}
         COMMAND ${CMAKE_COMMAND} -E chdir

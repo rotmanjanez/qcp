@@ -6,6 +6,13 @@ cmake_minimum_required(VERSION 3.7)
 project(qcp)
 
 # ---------------------------------------------------------------------------
+# Options
+# ---------------------------------------------------------------------------
+option(QCP_BUILD_TESTS "Build tests" ON)
+option(QCP_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(QCP_BUILD_MUSL_LIBC "Build musl libc" ON)
+
+# ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------
 set(CMAKE_CXX_STANDARD 20)
@@ -13,7 +20,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -Wall -Wextra -Wpedantic -fsanitize=undefined -ftemplate-backtrace-limit=0")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -fno-exceptions")
 
 # ---------------------------------------------------------------------------
 # Dependencies
@@ -21,10 +28,19 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
 include("${CMAKE_SOURCE_DIR}/clang-tidy.cmake")
 include("${CMAKE_SOURCE_DIR}/gperf.cmake")
 
-include("${CMAKE_SOURCE_DIR}/vendor/googletest.cmake")
-include("${CMAKE_SOURCE_DIR}/vendor/csmith.cmake")
-include("${CMAKE_SOURCE_DIR}/vendor/benchmark.cmake")
-# include("${CMAKE_SOURCE_DIR}/vendor/musl.cmake")
+if (QCP_BUILD_TESTS)
+    include("${CMAKE_SOURCE_DIR}/vendor/googletest.cmake")
+    include("${CMAKE_SOURCE_DIR}/vendor/csmith.cmake")
+    # include("${CMAKE_SOURCE_DIR}/vendor/alive2.cmake")
+endif()
+
+if (QCP_BUILD_BENCHMARKS)
+    include("${CMAKE_SOURCE_DIR}/vendor/benchmark.cmake")
+endif()
+
+if (QCP_BUILD_MUSL_LIBC)
+    include("${CMAKE_SOURCE_DIR}/vendor/musl.cmake")
+endif()
 
 # ---------------------------------------------------------------------------
 # Includes
@@ -40,11 +56,12 @@ find_package(LLVM REQUIRED CONFIG)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
-llvm_map_components_to_libnames(llvm core)
+llvm_map_components_to_libnames(llvm core support target VE X86)
 
 message(STATUS "Components mapped to libnames: ${llvm}")
 add_definitions(${LLVM_DEFINITIONS})
 include_directories(SYSTEM ${LLVM_INCLUDE_DIR})
+include_directories(${CLANG_INCLUDE_DIRS})
 
 # ---------------------------------------------------------------------------
 # Sources
@@ -106,31 +123,33 @@ set(BENCH_CC
 # Targets
 # ---------------------------------------------------------------------------
 add_library(libqcp STATIC ${SRC_CC})
-target_link_libraries(libqcp ${llvm})
+target_link_libraries(libqcp PRIVATE ${llvm})
 
 add_executable(qcp src/main.cc)
-target_link_libraries(qcp libqcp)
+target_link_libraries(qcp PRIVATE libqcp)
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
-add_executable(tester test/tester.cc ${TEST_CC})
-target_link_libraries(tester libqcp gtest)
+if (QCP_BUILD_TESTS)
+    add_executable(tester test/tester.cc ${TEST_CC})
+    target_link_libraries(tester libqcp gtest)
 
-enable_testing()
-add_test(qcp tester)
+    enable_testing()
+    add_test(qcp tester)
 
-# copy test1 folder to build directory
-file(COPY ${CMAKE_SOURCE_DIR}/test/test1 DESTINATION ${CMAKE_BINARY_DIR})
-file(COPY ${CMAKE_SOURCE_DIR}/test/diagnostics DESTINATION ${CMAKE_BINARY_DIR})
+endif()
+
 
 # ---------------------------------------------------------------------------
 # Benchmarks
 # ---------------------------------------------------------------------------
-get_property(BENCHMARK_HEADERS TARGET benchmark PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+if (QCP_BUILD_BENCHMARKS)
+    get_property(BENCHMARK_HEADERS TARGET benchmark PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
 
-add_executable(bench bench/benchmark.cc ${BENCH_CC} ${BENCHMARK_HEADERS})
-target_link_libraries(bench libqcp benchmark)
+    add_executable(bench bench/benchmark.cc ${BENCH_CC} ${BENCHMARK_HEADERS})
+    target_link_libraries(bench libqcp benchmark)
+endif()
 
 # ---------------------------------------------------------------------------
 # Linting
@@ -150,5 +169,6 @@ add_dependencies(lint include_linting src_linting test_linting)
 message(STATUS "[qcp] info")
 message(STATUS "    BUILD_TYPE                  = ${CMAKE_BUILD_TYPE}")
 message(STATUS "[qcp] settings")
-message(STATUS "    GTEST_INCLUDE_DIR           = ${GTEST_INCLUDE_DIR}")
-message(STATUS "    GTEST_LIBRARY_PATH          = ${GTEST_LIBRARY_PATH}")
+message(STATUS "    Tests                       = ${QCP_BUILD_TESTS}")
+message(STATUS "    Benchmarks                  = ${QCP_BUILD_BENCHMARKS}")
+message(STATUS "    Musl libc                   = ${QCP_BUILD_MUSL_LIBC}")
